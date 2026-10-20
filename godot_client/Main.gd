@@ -8,6 +8,9 @@ var ws := WebSocketPeer.new()
 var connected := false
 var connecting := false          # đã gọi connect_to_url, chưa mở xong
 var pending_out: Array = []      # gói chờ gửi khi kết nối mở (đăng nhập/đăng ký...)
+var ctx_menu: PopupMenu              # menu chuột phải lên người chơi khác (mời party)
+var ctx_target := ""
+var party_state: Dictionary = {}   # gói `party` mới nhất từ server (P1)
 var auto_login: Array = []       # sau register_ok: tự gửi login với [account, password]
 var login_screen: LoginScreen
 var player_id := "local"
@@ -86,6 +89,15 @@ func _ready():
 	ui.use_pressed.connect(func(iid): _send({"op": "use", "item": iid}))
 	ui.unequip_pressed.connect(func(slot): _send({"op": "unequip", "slot": slot}))
 	ui.chat_sent.connect(_on_chat)
+	ui.party_action.connect(func(op: String, args: Dictionary):
+		var m := {"op": op}
+		m.merge(args)
+		_send(m))
+	ctx_menu = PopupMenu.new()
+	add_child(ctx_menu)
+	ctx_menu.id_pressed.connect(func(mid: int):
+		if mid == 0 and ctx_target != "":
+			_send({"op": "party_invite", "name": str(names.get(ctx_target, ""))}))
 	ui.learn_pressed.connect(func(sid): _send({"op": "learn", "spell": sid}))
 	ui.cast_pressed.connect(_on_cast_spell)
 	ui.auto_toggled.connect(_on_auto)
@@ -228,6 +240,9 @@ func _handle(msg: Dictionary):
 					_remove(pid)
 			player_id = new_id
 			my_name = str(msg.get("name", new_id))
+			ui.party_panel.my_id = new_id
+			ui.party_panel.invites.clear()
+			ui.set_party({"id": null, "members": [], "invites": []})   # vào game mới: chưa ở party
 			my_voc = int(msg.get("vocation", 4))
 			world.vocations[new_id] = my_voc   # animation theo vocation (VocSprite.SPECS)
 			target = ""
@@ -275,6 +290,12 @@ func _handle(msg: Dictionary):
 				str(msg.get("kind", "player")), str(msg.get("name", "")),
 				int(msg.get("hp", 1)), int(msg.get("max_hp", 1)))
 			world.sleeping[str(msg["id"])] = bool(msg.get("sleeping", false))   # người đang ngủ trên giường (server beds.py)
+			if msg.has("party"):
+				world.party_of[str(msg["id"])] = int(msg["party"])               # cờ party (server party.py)
+				world.party_leader[str(msg["id"])] = bool(msg.get("party_leader", false))
+			else:
+				world.party_of.erase(str(msg["id"]))
+				world.party_leader.erase(str(msg["id"]))
 			if str(msg.get("kind", "")) == "npc":
 				world.set_look(str(msg["id"]), NPC_COLORS.get(str(msg.get("name", "")), [0.6, 0.6, 0.7]), null)
 				world.npc_types[str(msg["id"])] = str(msg.get("npc_type", ""))   # "depot" -> WorldView vẽ rương
@@ -295,7 +316,17 @@ func _handle(msg: Dictionary):
 		"move", "creature_move":
 			_move_mark(str(msg["id"]), Vector2i(int(msg["x"]), int(msg["y"])))
 		"say":
-			ui.add_log("local", "[color=#5fb0ff]%s:[/color] %s" % [msg.get("id", "?"), _esc(str(msg.get("text", "")))])
+			ui.add_log("local", "[color=#5fb0ff]%s:[/color] %s" % [msg.get("name", msg.get("id", "?")), _esc(str(msg.get("text", "")))])
+		"party":
+			party_state = msg
+			ui.set_party(msg)
+		"party_invite":
+			ui.party_panel.add_invite(int(msg.get("party", 0)), str(msg.get("from", "?")), int(msg.get("ttl", 120)))
+			ui.add_log("server", "[color=#ffd060]%s mời bạn vào party. Gõ /p accept để vào, /p decline để từ chối (hết hạn sau %d giây).[/color]" % [_esc(str(msg.get("from", "?"))), int(msg.get("ttl", 0))])
+		"party_invite_end":
+			ui.party_panel.end_invite(int(msg.get("party", 0)))
+		"party_say":
+			ui.add_log("local", "[color=#7fe08a][Party] %s:[/color] %s" % [_esc(str(msg.get("from", "?"))), _esc(str(msg.get("text", "")))])
 		"effect":
 			var eid = str(msg.get("id", "?"))
 			var dmg = int(msg.get("dmg", 0))
@@ -635,10 +666,18 @@ func _unhandled_input(e):
 			var cid2 = world.entity_at(e.position)
 			if cid2 != "" and kinds.get(cid2) == "creature":
 				set_target(cid2)  # chọn là tự dí + đánh (gửi trong set_target)
+			elif cid2 != "" and kinds.get(cid2) == "player" and cid2 != player_id:
+				_player_menu(cid2, e.position)   # người chơi khác: menu Mời vào Party
 			else:
 				_right_click_bed(world.screen_to_tile(e.position))
 
 ## Chuột phải giường: đứng cạnh (<= 1 ô) thì ngủ (server kiểm quyền chủ/khách + mọi điều kiện), còn xa thì đi tới giường trước.
+func _player_menu(cid: String, pos: Vector2) -> void:
+	ctx_target = cid
+	ctx_menu.clear()
+	ctx_menu.add_item("Mời %s vào Party" % str(names.get(cid, cid)), 0)
+	ctx_menu.popup(Rect2i(Vector2i(pos), Vector2i.ZERO))
+
 func _right_click_bed(t: Vector2i) -> void:
 	var bh: Dictionary = world.bed_house_at(t)
 	if bh.is_empty():
@@ -763,6 +802,9 @@ func _on_chat(text: String):
 	var t = text.strip_edges()
 	ui.chat_input.release_focus()
 	if t == "":
+		return
+	if t.begins_with("/"):
+		_send({"op": "party_cmd", "text": t})   # lệnh chat tạm (/party invite <tên>...) cho tới khi có Panel Party
 		return
 	_send({"op": "say", "text": t})
 	if not connected:

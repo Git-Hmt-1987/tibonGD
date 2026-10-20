@@ -18,6 +18,7 @@ signal use_pressed(item_id: int)
 signal unequip_pressed(slot: String)
 signal target_selected(cid: String)
 signal chat_sent(text: String)
+signal party_action(op: String, args: Dictionary)   # Panel Party -> Main gửi op party_* (kèm args)
 
 # Tên item do server gửi (gói có field "names": {id: tên}); ITEM_NAMES dưới đây chỉ là dự phòng offline.
 static var server_names := {}
@@ -102,6 +103,7 @@ var skills_panel: PanelContainer
 var vip_panel: PanelContainer
 var vip_rows: VBoxContainer
 var status_panel: PanelContainer
+var party_panel: PartyPanel     # Panel Party (cột trái, vị trí cũ của Trạng thái); Trạng thái nay nằm cột phải trên Battle
 var status_box: VBoxContainer
 var status_exp_bar: ProgressBar  # thanh % EXP ngay dưới dòng "EXP" trong card Trạng thái
 var status_exp_pct: Label
@@ -178,7 +180,8 @@ func build():
 	_build_top_right(right)
 	_build_top_center()
 	_build_vitals(left)  # TRÊN CÙNG, trước panel Trạng thái / Skills
-	_build_top_left_status(left)
+	_build_top_left_status(right)   # Trạng thái: cột phải, ngay dưới minimap và trên Battle
+	_build_party_panel(left)        # Party: cột trái, ngay dưới HP/Mana (vị trí cũ của Trạng thái)
 	_build_hotbar()
 	_build_exp_bar()
 	_build_bottom_right_icons()
@@ -254,11 +257,26 @@ func _build_top_center():
 	tgt_hp_text.mouse_filter = MOUSE_FILTER_IGNORE
 	hh.add_child(tgt_hp_text)
 
-# ---------- trái-trên: Status panel ----------
+# ---------- Panel Party (cột trái) ----------
 
-func _build_top_left_status(left: VBoxContainer):
+func _build_party_panel(left: VBoxContainer):
+	party_panel = PartyPanel.new()
+	left.add_child(party_panel)
+	party_panel.build()
+	party_panel.action.connect(func(op: String, args: Dictionary): party_action.emit(op, args))
+
+## Gói `party` từ server. Lần đầu vào party thì tự mở panel; rời hết thì giữ nguyên trạng thái mở/đóng.
+func set_party(msg: Dictionary):
+	var was: bool = party_panel.in_party()
+	party_panel.set_state(msg)
+	if party_panel.in_party() and not was:
+		party_panel.show_panel()
+
+# ---------- Status panel (cột phải, trên Battle) ----------
+
+func _build_top_left_status(col: VBoxContainer):
 	status_panel = _panel()
-	left.add_child(status_panel)
+	col.add_child(status_panel)
 	var v = VBoxContainer.new()
 	status_panel.add_child(v)
 	v.add_child(UiKit.title("Trạng thái"))
@@ -343,6 +361,7 @@ func _build_bottom_right_icons():
 			["battle", "btn_battle", "Bt", "Battle list (B)", Color(0.85, 0.35, 0.3)],
 			["vip", "btn_vip", "Vp", "Online / VIP (V)", Color(0.8, 0.65, 0.25)],
 			["status", "btn_status", "St", "Trạng thái (U)", Color(0.55, 0.45, 0.85)],
+			["party", "btn_party", "Pt", "Party", Color(0.35, 0.75, 0.4)],
 			["auto", "btn_auto", "AU", "Bật/tắt Auto săn theo vùng (T)", Color(0.3, 0.75, 0.6)],
 			["autocfg", "btn_autocfg", "Ac", "Cấu hình Auto (Y)", Color(0.3, 0.6, 0.75)],
 			["spell", "btn_spell", "Sp", "Spells", Color(0.35, 0.65, 0.95)],
@@ -371,6 +390,7 @@ func _on_fun(which: String):
 		"battle": toggle_popup("battle")
 		"vip": toggle_popup("vip")
 		"status": toggle_popup("status")
+		"party": party_panel.toggle()
 		"spell": spell_panel.visible = not spell_panel.visible
 		"autocfg": toggle_auto_panel()
 		"logout": logout_pressed.emit()

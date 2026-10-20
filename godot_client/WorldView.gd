@@ -48,6 +48,8 @@ var fx_cells: Array = []    # {cells: Array[Vector2i], t0, until, color} hiệu 
 var fx_shots: Array = []    # {a, b, t0, until, color} đạn bay (gói fx.ani)
 var npc_types := {}         # id NPC -> npc_type ("spell"/"shop"/"teleport"/"depot"/"house"); "depot" vẽ rương, "house" vẽ ngôi nhà nhỏ (Main điền khi spawn)
 var houses: Array = []      # gói `map.houses` (server houses.public + status khi qua house_pub): nhà của map hiện tại, vẽ ở _draw_houses
+var party_of := {}           # id người chơi -> id party (spawn.party): vẽ cờ party trên đầu
+var party_leader := {}       # id -> true nếu là leader
 var sleeping := {}          # id -> true: đang ngủ trên giường (gói `sleep`, spawn.sleeping) -> vẽ Zzz + phủ xanh tối
 var my_name := ""           # tên nhân vật mình: so với house.owner để biết nhà của mình (cửa mở)
 var looks := {}             # id -> {color: Color, size: float(ô)} — tùy chọn do server gửi (spawn.color / spawn.size)
@@ -248,6 +250,8 @@ func set_invisible(pid: String, on: bool) -> void:
 	queue_redraw()
 
 func forget(pid: String):
+	party_of.erase(pid)
+	party_leader.erase(pid)
 	sleeping.erase(pid)
 	npc_types.erase(pid)
 	invisible.erase(pid)
@@ -460,6 +464,8 @@ func _draw():
 			_draw_actor(pid, ap)
 			if sleeping.get(pid, false):
 				_draw_sleep_overlay(ap)
+			if party_of.has(pid):
+				_draw_party_flag(pid, ap)
 	if not trees_done:
 		_draw_trees()
 	_in_draw = false
@@ -580,6 +586,18 @@ func _draw_chest(nm: String, p: Vector2) -> void:
 	draw_rect(Rect2(p + Vector2(3, 12), Vector2(18, 2)), Color(0.85, 0.7, 0.2))
 	draw_rect(Rect2(p + Vector2(10, 12), Vector2(4, 5)), Color(0.95, 0.82, 0.3))
 	draw_string(font, p + Vector2(-8, -4), nm, HORIZONTAL_ALIGNMENT_CENTER, TILE + 16, 11, Color(0.5, 0.9, 1.0))
+
+## Cờ party: tấm khiên nhỏ trên đầu — vàng = leader, xanh lá = thành viên; kèm vòng sáng dưới chân người cùng party với mình.
+func _draw_party_flag(pid: String, p: Vector2) -> void:
+	var lead: bool = bool(party_leader.get(pid, false))
+	var col := Color(1.0, 0.85, 0.2) if lead else Color(0.35, 0.9, 0.45)
+	var c := p + Vector2(TILE * 0.5, -34.0)
+	var pts := PackedVector2Array([c + Vector2(-5, -5), c + Vector2(5, -5), c + Vector2(5, 1), c + Vector2(0, 6), c + Vector2(-5, 1)])
+	draw_colored_polygon(pts, col)
+	var outline := PackedVector2Array(pts)
+	outline.append(pts[0])
+	draw_polyline(outline, Color(0, 0, 0, 0.8), 1.0)
+	draw_arc(p + Vector2(TILE * 0.5, TILE - 3.0), TILE * 0.42, 0.0, TAU, 20, Color(col.r, col.g, col.b, 0.55), 1.5)
 
 ## Đang ngủ: phủ xanh tối lên ô + chữ Z bay lên (chỗ để thay bằng sprite nằm: giữ chữ ký hàm).
 func _draw_sleep_overlay(p: Vector2) -> void:

@@ -162,3 +162,27 @@ x,y = vị trí trên sơ đồ (worldmap.py LAYOUT). Vị trí hero do client t
 - Server nghe `TIBIA_HOST:TIBIA_PORT` (mặc định `0.0.0.0:7172`). Chỉ chơi máy mình: `TIBIA_HOST=127.0.0.1`.
 - Giới hạn (config.NET_*): tối đa 64 kết nối (đầy -> `login_err "Máy chủ đầy"` rồi đóng); gói client→server ≤ 16 KB (quá -> đóng 1009); ~40 gói/s, burst 80 (dư bị bỏ, bỏ quá 200 lần -> ngắt); gửi cho 1 client quá 3 s -> ngắt client đó; ping/pong 20 s.
 - Mật khẩu vẫn gửi nguyên văn qua `ws://`: ra Internet phải đi qua mạng riêng mã hóa (Tailscale/ZeroTier/VPN) hoặc `wss://` sau reverse proxy.
+
+## Party (P1, party.py)
+Dữ liệu chỉ sống trong phiên: thoát game = rời party. Tối đa `PARTY_MAX_MEMBERS` (10, gồm leader). Lời mời hết hạn sau 120 s.
+Party "rỗng" (không member, không lời mời) tự giải tán. Leader rời -> người vào sớm nhất lên làm leader.
+
+**Client → server**
+| op | trường | ai được làm |
+|---|---|---|
+| `party_invite` | `name` | không ở party (tự tạo) hoặc leader |
+| `party_accept` / `party_decline` | `from?` (tên leader; bỏ trống = lời mời mới nhất) | người được mời |
+| `party_leave` | | thành viên |
+| `party_kick` | `name` (thành viên hoặc người đang được mời) | leader |
+| `party_pass` | `name` (chuyển leader) | leader |
+| `party_disband` | | leader |
+| `party_share` | `on?` (bỏ trống = đảo) | leader |
+| `party_say` | `text` (≤120) | thành viên |
+| `party_cmd` | `text` bắt đầu bằng `/`: `/party invite <tên>`, `accept [tên]`, `decline [tên]`, `leave`, `kick <tên>`, `lead <tên>`, `disband`, `share [on\|off]`, `list`, `say <chữ>`; viết tắt `/p`, `/ps <chữ>` | |
+
+**Server → client**
+- `party {id|null, leader, share, min_level, bonus, members:[{id,name,level,vocation,hp,max_hp,mana,max_mana,map,x,y,leader}], invites:[tên]}` — gửi khi đổi + mỗi 1 s; `invites` chỉ leader thấy; `id:null` = không ở party. `min_level` = ceil(level cao nhất / 1.5), `bonus` = hệ số exp theo số vocation (1→×1.2, 2→×1.3, 3→×1.6, 4→×2.0).
+- `party_invite {from, from_id, party, ttl}` · `party_invite_end {party}` (lời mời xong/huỷ/hết hạn) · `party_say {from, text}` · `msg {text}` cho thông báo/lỗi.
+- `spawn` của người chơi có thêm `party` (id party) và `party_leader` khi đang ở party có ≥2 người hoặc lời mời đang chờ; rời party thì phát lại `spawn` không có các trường này.
+- `say` nay có thêm `name`.
+Chia exp thật (`share`) làm ở P2; hiện `share` chỉ là cờ.
