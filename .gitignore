@@ -1,0 +1,23 @@
+# Repo này CHỈ chứa client Godot + workflow build web. Server (tibia_py), dữ liệu và save chạy trên máy bạn, không đưa lên.
+# Cách làm: bỏ qua tất cả, rồi cho phép lại đúng những thứ cần.
+/*
+!/.gitignore
+!/.github/
+!/godot_client/
+!/HUONG_DAN_WEB.md
+!/chay_online.bat
+!/chay_online.sh
+!/PROTOCOL.md
+
+# trong godot_client: bỏ file tạm/rác
+godot_client/.godot/
+godot_client/*.tmp
+godot_client/*.zip
+godot_client/*.md
+*.log
+.env
+.env.*
+*.pem
+*.key
+*.db
+__pycache__/
