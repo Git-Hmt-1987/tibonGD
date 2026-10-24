@@ -1,0 +1,3 @@
+# fx/element — mặc định theo HỆ (dùng khi spell/hằng không có file riêng)
+`fire.png` `ice.png` `energy.png` `earth.png` `holy.png` `death.png` `physical.png` `healing.png`
+Thêm `_shot` cho đạn: `fire_shot.png`... Thêm `_cast` cho hiệu ứng trên người cast: `fire_cast.png`...

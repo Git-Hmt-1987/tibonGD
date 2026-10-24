@@ -92,7 +92,7 @@ Trạng thái: `đã làm` (server) — client Godot xử lý `spells`/`cast`; `
 |---|---|---|---|---|
 | C→S | `cast` | `spell:id`, `target?:creatureId` | — | như cũ; mọi spell của vocation (137 spell, xem `spell_data/SPELLS_BY_VOCATION.md`) |
 | C→S | `use` | `item:id` | — | item là **rune** → bắn lên mục tiêu đang chọn (`attack`/click quái), trừ 1 charge |
-| C→S | `learn` | `spell:id` | — | chỉ spell NPC bán (`needs_learn`); spell khác trả "You do not need to learn this spell." |
+| C→S | `learn` | `spell:id` | — | học spell trong Spell Panel (không cần NPC): trừ giá ở `spell_data/spell_prices.json` (túi + Bank), cần đủ level/vocation/Premium; spell không có giá (level 1) trả "You do not need to learn this spell." |
 | S→C | `spells` | `premium`, `spells:[{id,tab,name,words,level,mana,soul,voc,prem,cd,kind,range,armor,element,desc,group,aim,price,needs_learn,learned}]` | chủ nhân | **chỉ spell hợp vocation**. `tab`: appren=tấn công, voc=hồi/hỗ trợ, prem=conjure. `kind`: heal/single/aoe/support/conjure. `aim`: self/target/target_or_dir/dir/pos |
 | S→C | `fx` | `id`,`from:[x,y]`,`me?`(CONST_ME_*),`ani?`(CONST_ANI_*),`tiles?:[[x,y]..≤64]` | cả map | hiệu ứng ma thuật / đạn bay; client cũ bỏ qua |
 | S→C | `say` | `id,text` | cả map | spell cast thành công hiện words trên đầu |
@@ -118,10 +118,10 @@ _(trống)_
 _(trống)_
 
 ### Làn E — NPC (14/10/2026, `tibia_py/npc.py`, dữ liệu `npc_data/npcs.json`)
-Không hội thoại. 4 NPC đứng ở Dream Land (PZ): `npc_spell` "Spell" (bán spell), `npc_equip` "Trang bị", `npc_supply` "Vật dụng", `npc_potion` "Potion" (mua/bán đồ).
-- Server -> client: `spawn` với `kind:"npc"`, `npc_type:"spell"|"shop"` (gửi lúc vào game và khi warp vào map có NPC; ô NPC chặn đường).
-- Client -> server: `npc_open{id}` (mở shop, phải đứng cách <= 4 ô), `npc_buy{id,item,n}` / `npc_buy{id,spell}` (NPC Spell), `npc_sell{id,item,n}`, `npc_close{id}`. `n` bị kẹp 1..100.
-- Server -> client: `npc_shop{id,name,type,gold,cap,buy:[],sell:[]}` (gửi lại sau mỗi giao dịch). `buy`/`sell` là item `{id,name,price,w,caption,vocs?,have?}` hoặc spell `{spell,name,words,price,level,prem,known,caption}` (`caption` = chú thích 1 dòng: mô tả/chỉ số/yêu cầu/cân nặng; spell: mana + mô tả). Tab Bán của 3 NPC shop liệt kê MỌI món trong túi trừ gold/platinum/crystal; giá = giá riêng của NPC -> giá bán cao nhất ở shop khác -> `default_sell`; `npc_sell` không giới hạn 100/lần (tối đa số đang có) (sell của NPC Spell rỗng); `npc_close{id}` khi đứng xa. Kèm `backpack` + `stats` mới sau mỗi giao dịch. Tiền = gold id 3031; thiếu tiền/capacity -> `msg` báo lỗi, không đổi gì.
+Không hội thoại. 4 NPC đứng ở Dream Land (PZ): (NPC "Spell" đã bỏ: spell học trong Spell Panel qua op `learn`), `npc_equip` "Trang bị", `npc_supply` "Vật dụng", `npc_potion` "Potion" (mua/bán đồ).
+- Server -> client: `spawn` với `kind:"npc"`, `npc_type:"shop"|"teleport"|"depot"|"house"` (gửi lúc vào game và khi warp vào map có NPC; ô NPC chặn đường).
+- Client -> server: `npc_open{id}` (mở shop, phải đứng cách <= 4 ô), `npc_buy{id,item,n}`, `npc_sell{id,item,n}`, `npc_close{id}`. `n` bị kẹp 1..100.
+- Server -> client: `npc_shop{id,name,type,gold,cap,buy:[],sell:[]}` (gửi lại sau mỗi giao dịch). `buy`/`sell` là item `{id,name,price,w,caption,vocs?,have?}` (`caption` = chú thích 1 dòng: mô tả/chỉ số/yêu cầu/cân nặng). Tab Bán của 3 NPC shop liệt kê MỌI món trong túi trừ gold/platinum/crystal; giá = giá riêng của NPC -> giá bán cao nhất ở shop khác -> `default_sell`; `npc_sell` không giới hạn 100/lần (tối đa số đang có); `npc_close{id}` khi đứng xa. Kèm `backpack` + `stats` mới sau mỗi giao dịch. Tiền = gold id 3031; thiếu tiền/capacity -> `msg` báo lỗi, không đổi gì.
 
 **Thành phố + Dịch Chuyển (15/10/2026):** 4 thành phố (map `kind:"city"`, đều là PZ, mỗi nơi đủ 5 NPC: 4 NPC cũ + `Dịch Chuyển`). NPC thành phố gốc giữ id cũ (`npc_spell`...), thành phố khác id `<id>@<map>` (vd `npc_travel@hell`).
 - Gói `map` thêm `theme` ("grass"|"mine"|"hell"|"desert", giao diện client) và `kind` ("city"|"hunt").
@@ -137,6 +137,7 @@ NPC `npc_house` "Nhà" (`npc_type:"house"`, mỗi thành phố một NPC; id th�
 
 ### Nhà — Giường + ngủ (3C, `tibia_py/beds.py`)
 - Client -> server: `bed_sleep{x,y}` (ô đầu/chân giường; chủ nhà hoặc khách được mời, đang trong nhà, cách giường <= 1 ô, không đang đánh, giường chưa có người), `bed_wake{}`. Thất bại -> `msg`.
+- Server -> client: `harmony{id,n,virtue}` phát cả map khi Harmony (0..5) hoặc Virtue (0 không, 1 Harmony, 2 Justice, 3 Sustain) của một Monk đổi: client vẽ `n` linh cầu sáng xoay trên đầu, màu theo Virtue. `spawn` của Monk (vocation 9) mang sẵn `harmony`,`virtue`. (`stats` của chính Monk cũng kèm `harmony`,`virtue`,`serene`.)
 - Server -> client: `sleep{id,on}` phát cả map khi lên/xuống giường (+ `move` đưa nhân vật tới ô đầu giường, `msg`, `stats`). `spawn` của người đang ngủ có `sleeping:true`.
 - Khi ngủ: mỗi `BED_APPLY_EVERY_S` giây cộng HP/mana (gấp `BED_REGEN_MULT` lần tốc độ hồi theo vocation) và +1 Soul mỗi `BED_SOUL_SECONDS` giây ngủ. Thức dậy khi: gửi `move`/`goto`/`attack`/`cast`/`use`/`use_on`/`npc_open`/`auto`/`follow` (op đó chỉ để thức dậy, không chạy tiếp), mất máu, mất quyền nhà (bị bỏ khỏi danh sách khách/mất nhà), chết, `bed_wake`, đăng xuất (cộng nốt phần hồi). Trạng thái ngủ không lưu save.
 
@@ -186,3 +187,21 @@ Party "rỗng" (không member, không lời mời) tự giải tán. Leader rờ
 - `spawn` của người chơi có thêm `party` (id party) và `party_leader` khi đang ở party có ≥2 người hoặc lời mời đang chờ; rời party thì phát lại `spawn` không có các trường này.
 - `say` nay có thêm `name`.
 Chia exp thật (`share`) làm ở P2; hiện `share` chỉ là cờ.
+
+## Chia EXP + map PvP (P2, expshare.py)
+Khi quái chết, exp chia theo `damage_map` (người đánh nhận `damage/tổng damage × exp`), rồi:
+- **Map PvP** (`config.PVP_MAPS`, hoặc env `TIBIA_PVP_MAPS=a,b`): mọi người chơi còn sống trong map (kể cả không đánh) chia đều tổng exp: mỗi người `ceil(tổng × hệ số nghề / số người)`. Hệ số nghề (1→×1.2, 2→×1.3, 3→×1.6, 4→×2.0) tắt được bằng `PVP_SHARE_VOCATION_BONUS`. Party không ảnh hưởng ở đây. `PVP_SHARE_DISTANCE` giới hạn khoảng cách tới quái (mặc định cả map).
+- **Map thường**: party chia khi `share` bật và MỌI thành viên "ok" (Canary party.cpp:548): level ≥ ceil(level cao nhất/1.5), cách leader ≤ 30 ô cùng map, và có đánh/hồi máu trong `PARTY_ACTIVITY_S` (120 s). Mỗi người = `ceil(quỹ × hệ số nghề / số thành viên)`. Không chia được thì ai đánh người nấy nhận.
+- `party` có thêm `share_active` (bool) và `share_why` (lý do chưa chia được, "" nếu ổn); `msg` báo "Party/Map PvP: chia EXP ...".
+- Quái hồi sinh xoá `damage_map` cũ.
+
+## Spell party (P3, spellcast._sp_party_*)
+Dùng như mọi spell self (op `cast`/ô hotbar); cần đang ở party và ≥ 2 thành viên (gồm người cast) trong 36 ô cùng map, không thì báo "No party members in range." (không tốn mana/cooldown). Mana thực = `ceil(0.9^(n-1) × mana_gốc × n)` (n = số người nhận); không tính premium (config.PARTY_SPELL_PREMIUM=False). Hiệu ứng là condition `BUFF_SPELL` (mất khi chết), cùng spell dùng lại thì làm mới thời gian.
+| Spell | Lời | Nghề | Lv | Mana gốc | Hiệu ứng |
+|---|---|---|---|---|---|
+| Train Party | `utito mas sio` | Knight | 32 | 60 | +3 melee, +3 distance, 2 phút |
+| Protect Party | `utamo mas sio` | Paladin | 32 | 90 | +3 shielding, 2 phút |
+| Heal Party | `utura mas sio` | Druid | 32 | 120 | +20 HP mỗi 2 s, 2 phút |
+| Enchant Party | `utori mas sio` | Sorcerer | 32 | 120 | +1 magic level, 2 phút |
+| Enlighten Party | `utevo mas sio` | (monk — game chưa có; bật bằng `config.ENLIGHTEN_PARTY_VOCS`) | 32 | 75 cố định | +5 mana mỗi 2 s, 5 phút; cooldown 5 phút |
+Cooldown 2 s (Enlighten 5 phút, nhóm 1 s). Người nhận được `msg` "X đã dùng <spell> lên bạn." và `area_fx CONST_ME_MAGIC_BLUE` tại ô từng người (thất bại: `CONST_ME_POFF`).

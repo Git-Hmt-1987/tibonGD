@@ -6,7 +6,7 @@ extends PanelContainer
 
 signal action(op: String, args: Dictionary)
 
-const VOC_SHORT := {1: "Sorc", 2: "Druid", 3: "Pal", 4: "Knight"}
+const VOC_SHORT := {1: "Sorc", 2: "Druid", 3: "Pal", 4: "Knight", 9: "Monk"}
 const COL_LEADER := Color(1.0, 0.85, 0.35)
 const COL_NAME := Color(0.9, 0.95, 1.0)
 const COL_FAR := Color(0.55, 0.58, 0.65)
@@ -42,6 +42,7 @@ func build() -> void:
 	add_child(v)
 	var head := HBoxContainer.new()
 	v.add_child(head)
+	UiKit.head_sep(head)
 	_title = UiKit.title("Party")
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(_title)
@@ -196,6 +197,14 @@ func _refresh() -> void:
 		_share_btn.modulate = Color(0.6, 1.0, 0.6) if on else Color(1, 1, 1)
 		_share_btn.disabled = not lead
 		_info.text = "Chia EXP cho người từ Lv %d · thưởng ×%.1f theo số nghề khác nhau" % [int(data.get("min_level", 0)), float(data.get("bonus", 1.0))]
+		if on and bool(data.get("share_active", false)):
+			_info.text += "\nĐANG CHIA EXP"
+			_info.add_theme_color_override("font_color", Color(0.1, 0.5, 0.2))
+		elif on:
+			_info.text += "\nChưa chia được: %s" % str(data.get("share_why", ""))
+			_info.add_theme_color_override("font_color", Color(0.75, 0.35, 0.1))
+		else:
+			_info.add_theme_color_override("font_color", UiTheme.muted())
 	else:
 		_title.text = "Party"
 		_info.text = ""
@@ -230,7 +239,7 @@ func _refresh_members(members: Array, lead: bool) -> void:
 		var nm: Label = r["name"]
 		nm.text = "%s%s  Lv %d %s%s" % ["★ " if is_lead else "", str(m.get("name", "?")), int(m.get("level", 1)),
 				str(VOC_SHORT.get(int(m.get("vocation", 0)), "")), "  (xa)" if far else ""]
-		nm.add_theme_color_override("font_color", COL_FAR if far else (COL_LEADER if is_lead else COL_NAME))
+		nm.add_theme_color_override("font_color", UiTheme.ink(COL_FAR if far else (COL_LEADER if is_lead else COL_NAME)))
 		var hp: ProgressBar = r["hp"]
 		hp.max_value = maxi(1, int(m.get("max_hp", 1)))
 		hp.value = int(m.get("hp", 0))

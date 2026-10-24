@@ -11,3 +11,7 @@ Kích thước gợi ý: nút = 32×32 (Attack/Balance/Defense 34×28), ô hotba
 | `btn_char.png` `btn_skills.png` `btn_battle.png` `btn_vip.png` `btn_status.png` `btn_auto.png` `btn_spell.png` `btn_logout.png` | hàng icon góc phải-dưới |
 | `item_<id>.png` (vd `item_238.png`) | ô hotbar gán item/pot/rune theo **id item** |
 | `spell_<id>.png` (vd `spell_ultimate_healing.png`) | ô hotbar gán spell theo **id spell** (xem `tibia_py/spell_data/spells.json`, trường `id`) |
+
+
+## Panel icon góc phải-dưới (ActionDock)
+Tên PNG tùy chọn (thả vào `assets/icons/buttons/`, thiếu thì dùng icon vector): `btn_char` `btn_skills` `btn_bag` `btn_battle` `btn_map` `btn_party` `btn_vip` `btn_status` `btn_spell` `btn_autocfg` `btn_chase` `btn_logout` `btn_auto` (nút tròn AUTO). Nền panel tùy chọn: `assets/ui/panels/dock.png`. Link Discord: hằng `DISCORD_URL` trong `ActionDock.gd`.

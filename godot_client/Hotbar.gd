@@ -12,10 +12,15 @@ signal use_item(item_id: int)
 signal cast_spell(spell_id: String)
 
 const COUNT := 12
-const SLOT_W := 38
-const GAP := 3
-const PICKER_W := 540
-const PICKER_H := 412
+const SLOT_W := 40
+const GAP := 9
+const PAD := 8        # đệm trong khung nền đen
+const KEY_H := 17     # chỗ cho nhãn phím phía trên mỗi ô
+const DIV_W := 0   # không còn vạch ngăn
+const BG_COL := Color("#161618")
+const GOLD := Color("#c9a24a")
+const PICKER_W := 560
+const PICKER_H := 450
 const PICKER_PER_PAGE := 8   # 2 cột x 4 hàng thẻ
 const ITEM_EXHAUST := 1.0
 
@@ -47,14 +52,32 @@ const SPELL_COLORS := {"appren": Color(0.95, 0.5, 0.35), "voc": Color(0.45, 0.85
 const ITEM_COLORS := {"equip": Color(0.55, 0.7, 0.95), "food": Color(0.95, 0.8, 0.4), "valuables": Color(0.95, 0.85, 0.3), "others": Color(0.62, 0.72, 0.85)}
 
 static func total_width() -> int:
-	return COUNT * SLOT_W + (COUNT - 1) * GAP
+	return COUNT * SLOT_W + (COUNT - 1) * GAP + DIV_W + 2 * PAD
+
+
+static func total_height() -> int:
+	return SLOT_W + KEY_H + 2 * PAD
 
 func build() -> void:
-	custom_minimum_size = Vector2(total_width(), SLOT_W)
+	custom_minimum_size = Vector2(total_width(), total_height())
+	var bg := Panel.new()   # khung nền đen viền vàng
+	var bsb := StyleBoxFlat.new()
+	bsb.bg_color = BG_COL
+	bsb.set_corner_radius_all(7)
+	bsb.set_border_width_all(2)
+	bsb.border_color = GOLD
+	bg.add_theme_stylebox_override("panel", bsb)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(bg)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", GAP)
 	add_child(row)
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = PAD
+	row.offset_right = -PAD
+	row.offset_top = PAD + KEY_H
+	row.offset_bottom = -PAD
 	for i in COUNT:
 		slots.append({"kind": "", "ref": ""})
 		var b := HotSlot.new()
@@ -200,43 +223,33 @@ static func _flat(bg: Color, border: Color, bw := 1, radius := 6) -> StyleBoxFla
 
 func _build_picker() -> void:
 	picker = PanelContainer.new()
-	picker.add_theme_stylebox_override("panel", _flat(Color(0.1, 0.12, 0.17, 0.98), Color(0.55, 0.47, 0.25), 2, 8))
+	picker.add_theme_stylebox_override("panel", UiKit.panel_style())
 	picker.visible = false
 	picker.z_index = 20
 	picker.custom_minimum_size = Vector2(PICKER_W, PICKER_H)
+	UiKit.block_world(picker)
 	add_child(picker)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 5)
+	v.add_theme_constant_override("separation", 6)
 	picker.add_child(v)
-	# --- đầu bảng: tiêu đề + đang gán gì + Xoá ô + đóng ---
+	# --- header xanh liền khối: tiêu đề + Xoá ô + đóng ---
 	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 6)
 	v.add_child(head)
-	var tbox := VBoxContainer.new()
-	tbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	tbox.add_theme_constant_override("separation", 0)
-	head.add_child(tbox)
-	picker_title = UiKit.title("Gán vào ô", 15)
-	tbox.add_child(picker_title)
-	picker_now = UiKit.lab("", 11, Color(0.62, 0.68, 0.78))
-	tbox.add_child(picker_now)
-	var clear := Button.new()
-	clear.text = "Xoá ô"
-	clear.focus_mode = Control.FOCUS_NONE
-	clear.add_theme_stylebox_override("normal", _flat(Color(0.35, 0.14, 0.14), Color(0.75, 0.3, 0.3)))
-	clear.add_theme_stylebox_override("hover", _flat(Color(0.5, 0.18, 0.18), Color(0.9, 0.4, 0.4)))
-	clear.add_theme_stylebox_override("pressed", _flat(Color(0.5, 0.18, 0.18), Color(0.9, 0.4, 0.4)))
-	clear.pressed.connect(func(): _assign("", ""))
-	head.add_child(clear)
+	UiKit.head_sep(head)
+	picker_title = UiKit.title("Gán vào ô", 16)
+	picker_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(picker_title)
 	var x := Button.new()
-	x.text = "✕"
-	x.focus_mode = Control.FOCUS_NONE
-	x.custom_minimum_size = Vector2(30, 0)
+	x.text = "X"
 	x.pressed.connect(close_picker)
 	head.add_child(x)
+	picker_now = UiKit.lab("", 12, Color(0.4, 0.4, 0.45))
+	picker_now.add_theme_color_override("font_color", UiTheme.muted())
+	picker_now.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(picker_now)
 	# --- tab lớn: Spell | Đồ ---
 	var tabs := HBoxContainer.new()
-	tabs.add_theme_constant_override("separation", 4)
+	tabs.add_theme_constant_override("separation", 8)
 	v.add_child(tabs)
 	for t in [["spell", "Spell đã học"], ["item", "Đồ / Pot / Rune (túi)"]]:
 		var tb := Button.new()
@@ -244,44 +257,81 @@ func _build_picker() -> void:
 		tb.toggle_mode = true
 		tb.focus_mode = Control.FOCUS_NONE
 		tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		tb.custom_minimum_size = Vector2(0, 30)
+		tb.custom_minimum_size = Vector2(0, 34)
+		tb.add_theme_font_size_override("font_size", 14)
 		tb.add_theme_font_override("font", UiKit.bold_font())
-		tb.add_theme_stylebox_override("normal", _flat(Color(0.15, 0.18, 0.25), Color(0.32, 0.37, 0.48)))
-		tb.add_theme_stylebox_override("hover", _flat(Color(0.2, 0.24, 0.33), Color(0.5, 0.55, 0.68)))
-		tb.add_theme_stylebox_override("pressed", _flat(Color(0.38, 0.3, 0.1), Color(1.0, 0.85, 0.4), 2))
-		tb.add_theme_stylebox_override("hover_pressed", _flat(Color(0.42, 0.33, 0.12), Color(1.0, 0.85, 0.4), 2))
+		tb.add_theme_stylebox_override("normal", CharPanel._box(Color("#e8dcc0"), Color("#c9b98f"), 2, 5))
+		tb.add_theme_stylebox_override("hover", CharPanel._box(Color("#f1e7cc"), UiTheme.accent(), 2, 5))
+		tb.add_theme_stylebox_override("pressed", CharPanel._box(UiTheme.accent(), UiTheme.accent_dark(), 2, 5))
+		tb.add_theme_stylebox_override("hover_pressed", CharPanel._box(UiTheme.accent(), UiTheme.accent_dark(), 2, 5))
+		for cn in ["font_pressed_color", "font_hover_pressed_color"]:
+			tb.add_theme_color_override(cn, Color.WHITE)
 		tb.pressed.connect(_set_tab.bind(str(t[0])))
 		tabs.add_child(tb)
 		tab_btns[str(t[0])] = tb
-	# --- lọc con (chip) + ô tìm ---
+	# --- thẻ nội dung: chip lọc + tìm + lưới + chân trang ---
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", CharPanel._card_box())
+	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(card)
+	var cv := VBoxContainer.new()
+	cv.add_theme_constant_override("separation", 6)
+	card.add_child(cv)
 	picker_sub = HBoxContainer.new()
 	picker_sub.add_theme_constant_override("separation", 4)
-	v.add_child(picker_sub)
+	cv.add_child(picker_sub)
 	picker_search = LineEdit.new()
-	picker_search.placeholder_text = "🔍 Tìm theo tên / words..."
+	picker_search.placeholder_text = "Tìm theo tên / words..."
 	picker_search.clear_button_enabled = true
 	picker_search.text_changed.connect(func(t: String):
 		picker_query = t.strip_edges().to_lower()
 		picker_pager.page = 0
 		_fill_picker())
-	v.add_child(picker_search)
-	# --- lưới thẻ (2 cột) trong vùng cố định, KHÔNG cuộn: lăn chuột = đổi trang ---
+	cv.add_child(picker_search)
+	# lưới thẻ (2 cột) vùng cố định, KHÔNG cuộn: lăn chuột = đổi trang
 	var area := VBoxContainer.new()
+	area.custom_minimum_size = Vector2(0, 4 * 50 + 3 * 6)   # đúng 4 hàng thẻ: chiều cao cố định, không nhảy theo số thẻ
 	area.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	area.clip_contents = true
-	v.add_child(area)
+	cv.add_child(area)
 	picker_grid = GridContainer.new()
 	picker_grid.columns = 2
 	picker_grid.add_theme_constant_override("h_separation", 6)
 	picker_grid.add_theme_constant_override("v_separation", 6)
 	picker_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	area.add_child(picker_grid)
-	picker_count = UiKit.lab("", 11, Color(0.62, 0.68, 0.78))
+	picker_count = UiKit.lab("", 11, Color(0.4, 0.4, 0.45))
+	picker_count.add_theme_color_override("font_color", UiTheme.muted())
 	picker_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(picker_count)
+	cv.add_child(picker_count)
 	picker_pager = Pager.new()
 	picker_pager.page_changed.connect(func(_p): _fill_picker())
-	v.add_child(picker_pager)
+	# chân trang: [trống | phân trang (giữa) | Xoá ô (phải)]
+	var foot := HBoxContainer.new()
+	cv.add_child(foot)
+	var fl := Control.new()
+	fl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	foot.add_child(fl)
+	picker_pager.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	foot.add_child(picker_pager)
+	var fr := HBoxContainer.new()
+	fr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fr.alignment = BoxContainer.ALIGNMENT_END
+	foot.add_child(fr)
+	var clear := Button.new()
+	clear.text = "Xoá ô"
+	clear.focus_mode = Control.FOCUS_NONE
+	clear.custom_minimum_size = Vector2(0, 28)
+	clear.add_theme_font_size_override("font_size", 13)
+	clear.add_theme_font_override("font", UiKit.bold_font())
+	var red := Color("#e57373")   # đỏ nhạt
+	clear.add_theme_stylebox_override("normal", CharPanel._box(red, red.darkened(0.25), 2, 5))
+	clear.add_theme_stylebox_override("hover", CharPanel._box(red.lightened(0.12), red.darkened(0.25), 2, 5))
+	clear.add_theme_stylebox_override("pressed", CharPanel._box(red.darkened(0.1), red.darkened(0.35), 2, 5))
+	for cn in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
+		clear.add_theme_color_override(cn, Color.WHITE)
+	clear.pressed.connect(func(): _assign("", ""))
+	fr.add_child(clear)
 	picker_pager.attach_wheel(area)
 
 func open_picker(i: int) -> void:
@@ -303,14 +353,17 @@ func open_picker(i: int) -> void:
 	picker.visible = true
 	_fill_picker()
 	_place_picker()
+	_place_picker.call_deferred()   # sau khi layout xong, đặt lại cho chắc
 
 ## Đặt bảng ngay trên hotbar, căn giữa, kẹp trong khung nhìn (không tràn ra ngoài màn hình).
 func _place_picker() -> void:
 	var vp := get_viewport_rect().size
 	var w := minf(float(PICKER_W), vp.x - 16.0)
-	picker.size = Vector2(w, PICKER_H)
-	var gx := global_position.x + (total_width() - w) / 2.0
-	var gy := global_position.y - PICKER_H - 6.0
+	picker.size = Vector2(w, PICKER_H)   # nhỏ hơn mức tối thiểu thì tự nở ra đúng nội dung
+	var ph := maxf(picker.size.y, float(PICKER_H))
+	picker.size = Vector2(w, ph)
+	var gx := global_position.x + (size.x - w) / 2.0
+	var gy := global_position.y - ph - 6.0   # neo mép DƯỚI sát trên hotbar, chiều cao đổi cũng không tràn xuống
 	picker.global_position = Vector2(clampf(gx, 8.0, maxf(8.0, vp.x - w - 8.0)), maxf(8.0, gy))
 
 func close_picker() -> void:
@@ -327,13 +380,13 @@ func _chip(text: String, active: bool, key: String) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE
-	b.add_theme_font_size_override("font_size", 11)
-	var bg := Color(0.38, 0.3, 0.1) if active else Color(0.15, 0.18, 0.25)
-	var bd := Color(1.0, 0.85, 0.4) if active else Color(0.32, 0.37, 0.48)
-	b.add_theme_stylebox_override("normal", _flat(bg, bd, 1, 10))
-	b.add_theme_stylebox_override("hover", _flat(bg.lightened(0.12), bd, 1, 10))
-	b.add_theme_stylebox_override("pressed", _flat(bg.lightened(0.12), bd, 1, 10))
-	var col := Color(1, 0.9, 0.5) if active else Color(0.8, 0.84, 0.92)
+	b.add_theme_font_size_override("font_size", 12)
+	var bg := UiTheme.accent() if active else Color("#e8dcc0")
+	var bd := UiTheme.accent_dark() if active else Color("#c9b98f")
+	b.add_theme_stylebox_override("normal", CharPanel._box(bg, bd, 2, 5))
+	b.add_theme_stylebox_override("hover", CharPanel._box(bg.lightened(0.12), UiTheme.accent(), 2, 5))
+	b.add_theme_stylebox_override("pressed", CharPanel._box(bg.lightened(0.12), bd, 2, 5))
+	var col := Color.WHITE if active else UiTheme.ink_color()
 	for cn in ["font_color", "font_hover_color", "font_pressed_color"]:
 		b.add_theme_color_override(cn, col)
 	b.pressed.connect(func():
@@ -342,72 +395,61 @@ func _chip(text: String, active: bool, key: String) -> Button:
 		_fill_picker())
 	return b
 
-## Thẻ: viền màu theo loại + icon (thật nếu có, không thì ô màu + chữ cái) + tên + dòng phụ. `current` = đang gán ở ô này.
+## Thẻ sáng: icon (thật nếu có, không thì ô chữ cái) + tên + dòng phụ; `current` = đang gán ở ô này (nền/viền xanh).
 func _card(title: String, sub: String, accent: Color, tex: Texture2D, glyph: String, tip: String, current: bool) -> Button:
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(0, 52)
+	b.custom_minimum_size = Vector2(0, 50)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	b.focus_mode = Control.FOCUS_NONE
 	b.tooltip_text = tip
-	var base := Color(0.2, 0.17, 0.09) if current else Color(0.15, 0.18, 0.25)
-	var edge := Color(1.0, 0.85, 0.4) if current else Color(0.3, 0.35, 0.46)
-	b.add_theme_stylebox_override("normal", _flat(base, edge, 2 if current else 1))
-	b.add_theme_stylebox_override("hover", _flat(base.lightened(0.14), accent, 2))
-	b.add_theme_stylebox_override("pressed", _flat(base.lightened(0.22), accent, 2))
+	var base := UiTheme.accent_light() if current else Color("#fbf3dc")
+	var edge := UiTheme.accent() if current else Color("#bfae82")
+	b.add_theme_stylebox_override("normal", CharPanel._box(base, edge, 3 if current else 2, 5))
+	b.add_theme_stylebox_override("hover", CharPanel._box(base.lightened(0.2), UiTheme.accent(), 2, 5))
+	b.add_theme_stylebox_override("pressed", CharPanel._box(base, UiTheme.accent_dark(), 3, 5))
 	var row := HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_theme_constant_override("separation", 8)
 	b.add_child(row)
-	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 6)
-	var stripe := ColorRect.new()
-	stripe.color = accent
-	stripe.custom_minimum_size = Vector2(3, 0)
-	stripe.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(stripe)
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 5)
+	var ph := PanelContainer.new()
+	ph.custom_minimum_size = Vector2(38, 38)
+	ph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	ph.add_theme_stylebox_override("panel", CharPanel._box(Color("#e8dcc0"), accent, 2, 5))
 	if tex != null:
 		var icon_tex := TextureRect.new()
 		icon_tex.texture = tex
-		icon_tex.custom_minimum_size = Vector2(38, 38)
 		icon_tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon_tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		icon_tex.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(icon_tex)
+		ph.add_child(icon_tex)
 	else:
-		var ph := PanelContainer.new()
-		ph.custom_minimum_size = Vector2(38, 38)
-		ph.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		ph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		ph.add_theme_stylebox_override("panel", _flat(accent.darkened(0.55), accent, 1, 8))
-		var gl := UiKit.lab(glyph, 17, accent.lightened(0.35))
+		var gl := UiKit.lab_raw(glyph, 17, UiTheme.muted())
 		gl.add_theme_font_override("font", UiKit.bold_font())
 		gl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		gl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		gl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		ph.add_child(gl)
-		row.add_child(ph)
+	row.add_child(ph)
 	var mid := VBoxContainer.new()
 	mid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	mid.add_theme_constant_override("separation", 1)
+	mid.add_theme_constant_override("separation", 0)
 	row.add_child(mid)
-	var t1 := UiKit.lab(title, 12, Color(1, 0.93, 0.7) if current else Color(0.95, 0.95, 0.98))
+	var t1 := UiKit.lab(title, 13, Color(0.1, 0.1, 0.15))
 	t1.add_theme_font_override("font", UiKit.bold_font())
 	t1.clip_text = true
 	t1.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	t1.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mid.add_child(t1)
-	var t2 := UiKit.lab(sub, 10, Color(0.62, 0.68, 0.78))
+	var t2 := UiKit.lab(sub, 11, Color(0.4, 0.4, 0.45))
+	t2.add_theme_color_override("font_color", UiTheme.muted())
 	t2.clip_text = true
 	t2.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	t2.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mid.add_child(t2)
-	if current:
-		var ck := UiKit.lab("✓", 16, Color(1.0, 0.85, 0.4))
-		ck.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		ck.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(ck)
 	return b
 
 func _spell_list() -> Array:
@@ -447,10 +489,10 @@ func _item_list() -> Array:
 	return list
 
 func _fill_picker() -> void:
-	for c in picker_grid.get_children():
-		c.queue_free()
-	for c in picker_sub.get_children():
-		c.queue_free()
+	for box in [picker_grid, picker_sub]:   # gỡ NGAY (không chỉ queue_free): thẻ cũ còn lại sẽ làm panel phình to và không co lại
+		for c in box.get_children():
+			box.remove_child(c)
+			c.queue_free()
 	for k in tab_btns:
 		tab_btns[k].button_pressed = (k == picker_tab)
 	var spell_tab := picker_tab == "spell"
@@ -468,7 +510,7 @@ func _fill_picker() -> void:
 		else:
 			msg = "Túi trống (không có đồ để gán)."
 		picker_count.text = ""
-		var l := UiKit.lab(msg, 12, Color(0.7, 0.7, 0.7))
+		var l := UiKit.lab(msg, 12, Color(0.4, 0.4, 0.45))
 		picker_grid.add_child(l)
 		return
 	picker_count.text = "%d %s" % [list.size(), "spell" if spell_tab else "loại đồ"]

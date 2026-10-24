@@ -29,6 +29,7 @@ var clock_acc := 0.0
 
 var world: WorldView
 var ui: TibiaUI
+var vfx: VfxBridge             # [VFX] cầu nối gói tin -> hiệu ứng vfx_kit (vfx/VfxBridge.gd)
 var map_id := "city"
 var map_name := "Dream Land"
 var my_voc := 4
@@ -37,7 +38,8 @@ var death_label: Label
 var spell_info := {}          # id spell -> dict (từ gói `spells`), để tô màu hiệu ứng theo element khi cast
 var last_cast_element := ""   # element của spell mình vừa cast (D5: màu fx theo element)
 var last_cast_t := -99.0
-const VOC_NAMES := {1: "Sorcerer", 2: "Druid", 3: "Paladin", 4: "Knight"}
+var last_cast_spell := ""   # [SKIN] id spell mình vừa cast (chọn sprite fx/spell/<id>)
+const VOC_NAMES := {1: "Sorcerer", 2: "Druid", 3: "Paladin", 4: "Knight", 9: "Monk"}
 const NPC_RANGE := 4          # mirror server npc.RANGE (npc.cpp canInteract range 4)
 const NPC_COLORS := {"Spell": [0.7, 0.45, 1.0], "Trang bị": [0.85, 0.55, 0.2], "Vật dụng": [0.3, 0.75, 0.4],
 	"Potion": [0.9, 0.3, 0.35], "Dịch Chuyển": [0.25, 0.8, 0.95], "Nhà": [0.85, 0.35, 0.3]}   # màu áo NPC theo tên (chỉ để phân biệt, chưa có sprite)
@@ -48,8 +50,13 @@ var world_map_panel: WorldMapPanel   # bản đồ thế giới (phím M)
 var pending_npc := ""         # NPC vừa click khi còn xa: tới gần sẽ tự mở shop
 
 func _ready():
+	UiSkin.apply(get_tree().root)   # [SKIN] theme toàn cục (font/nút/panel từ assets/); chưa có asset thì không đổi gì
+	if OS.is_debug_build():
+		UiAssets.print_report()   # [SKIN] báo asset đã nhận trong Output
 	world = $World
 	ui = $UI
+	vfx = VfxBridge.new(world)   # [VFX] lớp hiệu ứng nằm trong WorldView, tự cuộn/zoom theo thế giới
+	add_child(vfx)
 	ui.build()
 	npc_panel = NpcPanel.new()
 	ui.add_child(npc_panel)
@@ -61,7 +68,7 @@ func _ready():
 	ui.add_child(world_map_panel)
 	world_map_panel.build()
 	world_map_panel.need_data.connect(func(): _send({"op": "world_map"}))
-	ui.map_btn.pressed.connect(func(): world_map_panel.toggle())   # nút M ở góc dưới-phải Card Map
+	ui.map_pressed.connect(func(): world_map_panel.toggle())   # ô M trong ActionDock
 	npc_panel.travel.connect(func(nid, mp): _send({"op": "npc_travel", "id": nid, "map": mp}))   # NPC Dịch Chuyển
 	npc_panel.closed.connect(func(nid): _send({"op": "npc_close", "id": nid}))
 	depot_panel = DepotPanel.new()   # Hòm đồ kiêm Bank: gửi/lấy đồ + gửi/rút tiền (server depot.py)
@@ -162,11 +169,7 @@ func _process(dt):
 	world.auto_origin = auto_origin if auto_mode else Vector2i(-1, -1)
 	world.auto_range = float(ui.auto_panel.cfg["radius"]) if (auto_mode or ui.auto_panel.visible) else 0.0
 	ws.poll()
-	clock_acc += dt
-	if clock_acc >= 1.0:
-		clock_acc = 0.0
-		var d = Time.get_datetime_dict_from_system()
-		ui.set_clock("%02d:%02d" % [d["hour"], d["minute"]])
+	ui.set_coord(tiles.get(player_id, Vector2i.ZERO))   # tọa độ nhân vật (thay giờ) dưới minimap
 	var state = ws.get_ready_state()
 	if state == WebSocketPeer.STATE_OPEN:
 		if not connected:
@@ -290,6 +293,8 @@ func _handle(msg: Dictionary):
 				str(msg.get("kind", "player")), str(msg.get("name", "")),
 				int(msg.get("hp", 1)), int(msg.get("max_hp", 1)))
 			world.sleeping[str(msg["id"])] = bool(msg.get("sleeping", false))   # người đang ngủ trên giường (server beds.py)
+			if msg.has("harmony"):   # Monk: linh cầu Harmony có sẵn lúc spawn
+				world.set_harmony(str(msg["id"]), int(msg["harmony"]), int(msg.get("virtue", 0)))
 			if msg.has("party"):
 				world.party_of[str(msg["id"])] = int(msg["party"])               # cờ party (server party.py)
 				world.party_leader[str(msg["id"])] = bool(msg.get("party_leader", false))
@@ -301,6 +306,9 @@ func _handle(msg: Dictionary):
 				world.npc_types[str(msg["id"])] = str(msg.get("npc_type", ""))   # "depot" -> WorldView vẽ rương
 			if msg.has("color") or msg.has("size"):  # tùy chọn (PROTOCOL §Làn D, đề xuất cho làn B)
 				world.set_look(str(msg["id"]), msg.get("color", null), msg.get("size", null))
+		"harmony":
+			# Monk: số linh cầu Harmony (0..5) + Virtue (màu cầu) của 1 người chơi; WorldView vẽ cầu xoay trên đầu
+			world.set_harmony(str(msg.get("id", "")), int(msg.get("n", 0)), int(msg.get("virtue", 0)))
 		"sleep":
 			# người chơi lên/xuống giường (server beds.py): vẽ Zzz; chính mình ngủ thì nhắc cách thức dậy
 			var sid := str(msg.get("id", ""))
@@ -333,6 +341,7 @@ func _handle(msg: Dictionary):
 			var ek = str(msg.get("kind", "hit"))
 			if ek == "death":
 				world.mark_dead(eid)   # animation nằm gục
+				_hit_fx(eid, "death")
 				# chỉ báo chết, không có số sát thương (server đã gửi `move` về đền + `stats` ngay sau)
 				if eid == player_id:
 					ui.add_log("server", "[color=red]You are dead.[/color]")
@@ -341,14 +350,17 @@ func _handle(msg: Dictionary):
 				# mana shield nuốt sát thương: số xanh, không nháy trắng (A5)
 				if tiles.has(eid):
 					_float_dmg(eid, dmg, "mana")
+					_hit_fx(eid, "mana")
 			else:
 				ui.add_log("server", "%s %s dmg=%s" % [ek, eid, dmg])
 				if tiles.has(eid):
 					world.hit(eid)
 					_float_dmg(eid, dmg, ek)
+					_hit_fx(eid, ek)
 					var src = str(msg.get("from", ""))
 					if src != "" and tiles.has(src) and src != eid and ek == "hit":
 						world.swing(src, tiles[eid])   # animation đánh thường
+						vfx.on_hit(eid, src, dmg)      # [VFX] hiệu ứng trúng đòn (hoãn nhẹ để loại đòn của spell)
 						world.basic_shot(tiles[src], tiles[eid], int(world.vocations.get(src, 0)))  # đạn đánh thường xa (Druid đá / Sorc sét / Paladin tên)
 		"fx":
 			# hiệu ứng spell/đạn (làn F): tiles = ô bị ảnh hưởng, ani = đạn bay từ `from`
@@ -356,9 +368,12 @@ func _handle(msg: Dictionary):
 			if tiles.has(fid):
 				world.cast(fid)   # animation thi pháp
 			var fr = msg.get("from", [])
-			if fr is Array and fr.size() >= 2:
+			# [VFX] ưu tiên: PNG skin (FxLib) > vfx_kit (spell đơn mục tiêu) > khối màu tạm cũ. on_fx = true thì đã vẽ xong.
+			var fx_own := fid == player_id and Time.get_ticks_msec() / 1000.0 - last_cast_t <= 1.5
+			var fx_done := vfx.on_fx(msg, last_cast_element if fx_own else "", last_cast_spell if fx_own else "")
+			if not fx_done and fr is Array and fr.size() >= 2:
 				world.add_fx(Vector2i(int(fr[0]), int(fr[1])), msg.get("tiles", []),
-					msg.has("ani"), msg.has("me") or not msg.has("ani"), _fx_color(msg))
+					msg.has("ani"), msg.has("me") or not msg.has("ani"), _fx_color(msg), _fx_defs(msg))
 		"aim":
 			# rune vùng/field/tường cần ô đất: vào chế độ ngắm, click trái chọn ô (use_on), chuột phải / ESC hủy
 			aim_item = int(msg.get("item", 0))
@@ -373,16 +388,18 @@ func _handle(msg: Dictionary):
 			world.remove_field(int(msg.get("x", 0)), int(msg.get("y", 0)))
 		"area_fx":
 			# B4/A6: hiệu ứng CONST_ME_* trên từng ô của vùng (chiêu quái, rune, spell vùng). Khối màu tạm theo tên hằng.
-			var acol = _const_fx_color(str(msg.get("effect", "")))
-			if acol.a > 0.0:
-				world.add_area_fx(msg.get("tiles", []), acol)
+			if not vfx.on_area_fx(msg):   # [VFX] true = vfx_kit đã vẽ vùng (và loại đòn đánh thường trùng); false = vẽ như cũ
+				var acol = _const_fx_color(str(msg.get("effect", "")))
+				var adef := FxLib.for_cell(str(msg.get("effect", "")), "", "")   # [SKIN] sprite fx/me/<tên>.png nếu có
+				if acol.a > 0.0 or not adef.is_empty():
+					world.add_area_fx(msg.get("tiles", []), acol, adef)
 		"shoot_fx":
 			# đạn bay CONST_ANI_* từ `from` tới `to` (2 ô [x,y]); khối tròn nhỏ + vệt, màu theo tên hằng.
 			var sa = msg.get("from", [])
 			var sb = msg.get("to", [])
 			if sa is Array and sb is Array and sa.size() >= 2 and sb.size() >= 2:
 				world.add_shoot_fx(Vector2i(int(sa[0]), int(sa[1])), Vector2i(int(sb[0]), int(sb[1])),
-					_const_fx_color(str(msg.get("effect", ""))))
+					_const_fx_color(str(msg.get("effect", ""))), FxLib.for_shot(str(msg.get("effect", "")), "", ""))   # [SKIN] fx/shoot/<tên>.png
 		"conditions":
 			if str(msg.get("id", player_id)) == player_id:
 				ui.set_conditions(msg.get("list", []))
@@ -414,6 +431,7 @@ func _handle(msg: Dictionary):
 			ui.set_fight(str(msg.get("mode", "attack")))
 		"map":
 			world.clear_fields()
+			vfx.clear()   # [VFX] dọn hiệu ứng map cũ
 			_cancel_aim()
 			map_id = str(msg.get("id", "city"))
 			map_name = str(msg.get("name", map_id))
@@ -453,7 +471,7 @@ func _handle(msg: Dictionary):
 			backpack = {}
 			for k in msg.get("items", {}):
 				var e = msg["items"][k]
-				backpack[int(k)] = {"n": int(e["n"]), "cat": str(e.get("cat", "others"))}
+				backpack[int(k)] = {"n": int(e["n"]), "cat": str(e.get("cat", "others")), "stats": e.get("stats", {})}   # stats (atk/def/arm...) nếu server gửi
 			ui.refresh_backpack(backpack)
 		"equip":
 			ui.set_equip(msg.get("slots", {}), msg.get("counts", {}))
@@ -461,6 +479,8 @@ func _handle(msg: Dictionary):
 			depot_panel.hide_panel()
 			house_panel.hide_panel()
 			npc_panel.show_shop(msg)
+			ui.char_panel.add_captions(msg.get("buy", []))
+			ui.char_panel.add_captions(msg.get("sell", []))
 		"depot_pub":
 			npc_panel.hide_shop()
 			house_panel.hide_panel()
@@ -487,6 +507,7 @@ func _handle(msg: Dictionary):
 				if cid == target:
 					_push_target()
 		"creature_dead":
+			vfx.on_creature_dead(str(msg["id"]))   # [VFX] quái bốc hơi (phải gọi trước _remove: cần tiles/looks/hps)
 			ui.add_log("server", "%s died." % _cname(str(msg["id"])))
 			if target == str(msg["id"]):
 				target = ""
@@ -501,6 +522,22 @@ func _handle(msg: Dictionary):
 			if target == str(msg.get("id", "")):
 				target = ""
 			_remove(str(msg.get("id", "")))
+
+# [SKIN] Sprite hiệu ứng cho gói `fx`: chỉ spell do CHÍNH MÌNH vừa cast (<=1.5s) mới biết id spell + hệ (gói fx chưa gửi),
+# còn lại tra theo tên CONST_ME_* / CONST_ANI_* trong gói. Rỗng = không có PNG -> WorldView vẽ khối màu tạm.
+func _fx_defs(msg: Dictionary) -> Dictionary:
+	var own := str(msg.get("id", "")) == player_id and Time.get_ticks_msec() / 1000.0 - last_cast_t <= 1.5
+	var sp := last_cast_spell if own else ""
+	var el := last_cast_element if own else ""
+	return {"cell": FxLib.for_cell(str(msg.get("me", "")), sp, el), "shot": FxLib.for_shot(str(msg.get("ani", "")), sp, el)}
+
+# [SKIN] Hiệu ứng trên người/quái bị trúng: kind = hit | heal | death | mana (assets/fx/hit/<kind>.png)
+func _hit_fx(pid: String, kind: String) -> void:
+	if not tiles.has(pid):
+		return
+	var d := FxLib.for_hit(kind)
+	if not d.is_empty():
+		world.add_tile_fx(tiles[pid], d)
 
 # Màu hiệu ứng ma thuật (CONST_ME_* chưa có sprite nên tô khối màu tạm): fx do CHÍNH MÌNH vừa cast (<=1.5s)
 # thì theo element spell (trường `element` trong gói spells); còn lại giữ màu cam mặc định.
@@ -549,6 +586,7 @@ func _float_dmg(pid: String, dmg: int, kind := "hit"):
 	var lab = Label.new()
 	lab.text = "+%d" % dmg if kind == "heal" else str(dmg)
 	lab.add_theme_font_size_override("font_size", 14)
+	lab.add_theme_font_override("font", UiSkin.font("damage"))   # [SKIN] assets/fonts/damage.ttf nếu có
 	if kind == "heal":
 		lab.add_theme_color_override("font_color", Color(0.3, 1, 0.4))
 	elif kind == "mana":
@@ -599,7 +637,7 @@ func _over_ui(pos: Vector2) -> bool:
 
 ## Đăng ký các panel/thanh không dựng bằng UiKit.panel()/TibiaUI._panel() vào group "ui_block".
 func _register_ui_blockers() -> void:
-	for c in [npc_panel, depot_panel, house_panel, world_map_panel, ui.spell_panel, ui.auto_panel, ui.hotbar, ui.hotbar.picker, ui.minimap, ui.vitals]:
+	for c in [npc_panel, depot_panel, house_panel, world_map_panel, ui.spell_panel, ui.auto_panel, ui.dock, ui.hotbar, ui.hotbar.picker, ui.minimap, ui.vitals]:
 		if c != null:
 			UiKit.block_world(c)
 
@@ -619,7 +657,9 @@ func _unhandled_input(e):
 			KEY_T: ui.auto_btn.button_pressed = not ui.auto_btn.button_pressed
 			KEY_Y: ui.toggle_auto_panel()
 			KEY_F: ui.chase_btn.button_pressed = not ui.chase_btn.button_pressed   # bật/tắt đuổi theo
-			KEY_C: ui.toggle_char()
+			KEY_C, KEY_I: ui.toggle_char()   # I = túi đồ (chung panel Character)
+			KEY_P: ui.party_panel.toggle()
+			KEY_O: ui.toggle_spell()
 			KEY_M: world_map_panel.toggle()
 			KEY_K: ui.toggle_popup("skills")
 			KEY_B: ui.toggle_popup("battle")
@@ -793,6 +833,7 @@ func _on_cast_spell(sid: String):
 	var info: Dictionary = spell_info.get(sid, {})
 	last_cast_element = str(info.get("element", ""))
 	last_cast_t = Time.get_ticks_msec() / 1000.0
+	last_cast_spell = sid
 	world.cast(player_id)   # animation thi pháp (không chờ server)
 	_send({"op": "cast", "spell": sid, "target": target})
 	if not connected:
@@ -860,9 +901,8 @@ func _push_status(msg := {}):
 	ui.set_identity(my_name, int(stats.get("level", 0)), str(VOC_NAMES.get(my_voc, "")))
 	ui.set_map_name(map_name)  # tên map đặt dưới minimap (thay nút Centre)
 	ui.set_status([
-		"Speed: %d" % my_speed,
-		"EXP %d" % int(stats.get("exp", 0)),
-		"No: %d:%02d (ăn food để nạp)" % [no / 60, no % 60],
+		"Cấp độ: %d" % int(stats.get("level", 0)),
+		"No: %d:%02d (food)" % [no / 60, no % 60],
 	])
 
 func _push_world():

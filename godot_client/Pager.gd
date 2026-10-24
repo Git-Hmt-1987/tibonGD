@@ -83,7 +83,7 @@ func _rebuild() -> void:
 		if i < 0:
 			var dots := Label.new()
 			dots.text = "…"
-			dots.add_theme_color_override("font_color", Color(0.6, 0.65, 0.75))
+			dots.add_theme_color_override("font_color", UiTheme.muted())
 			add_child(dots)
 		else:
 			add_child(_btn(str(i + 1), true, i == page, i))
@@ -95,22 +95,22 @@ func _btn(t: String, enabled: bool, current: bool, target: int) -> Button:
 	b.focus_mode = Control.FOCUS_NONE
 	b.custom_minimum_size = Vector2(26, 24)
 	b.disabled = not enabled
-	b.add_theme_font_size_override("font_size", 12)
+	b.add_theme_font_size_override("font_size", 13)
 	var sb := StyleBoxFlat.new()
-	sb.set_corner_radius_all(4)
-	sb.set_border_width_all(1)
-	sb.set_content_margin_all(2)
-	sb.bg_color = Color(0.42, 0.33, 0.1) if current else Color(0.17, 0.2, 0.27)
-	sb.border_color = GOLD if current else Color(0.35, 0.4, 0.5)
+	sb.set_corner_radius_all(7)
+	sb.set_border_width_all(2)
+	sb.set_content_margin_all(1)
+	sb.bg_color = UiTheme.accent() if current else Color("#e8dcc0")
+	sb.border_color = UiTheme.accent_dark() if current else Color("#c9b98f")
 	b.add_theme_stylebox_override("normal", sb)
 	var hov := sb.duplicate() as StyleBoxFlat
 	hov.bg_color = hov.bg_color.lightened(0.15)
 	b.add_theme_stylebox_override("hover", hov)
 	b.add_theme_stylebox_override("pressed", hov)
 	b.add_theme_stylebox_override("disabled", sb)
-	var col := GOLD if current else Color(0.85, 0.88, 0.95)
+	var col := Color.WHITE if current else UiTheme.ink_color()
 	for cn in ["font_color", "font_hover_color", "font_pressed_color"]:
 		b.add_theme_color_override(cn, col)
-	b.add_theme_color_override("font_disabled_color", Color(0.45, 0.48, 0.55))
+	b.add_theme_color_override("font_disabled_color", UiTheme.muted())
 	b.pressed.connect(go.bind(target))
 	return b

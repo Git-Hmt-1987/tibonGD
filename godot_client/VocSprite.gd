@@ -17,8 +17,10 @@ extends RefCounted
 ## Paladin + Druid (atlas 64px, đóng gói bằng tools/pack_frames.py): hàng 0-3 idle, 4-7 đi, 8-11 đánh (13 khung; Paladin thả tên ở khung 9,
 ##   Druid phóng lao rời tay ở khung 10), 12-15 thi pháp (7 khung); mỗi nhóm 4 hàng theo thứ tự xuống, lên, trái, phải.
 ##
-## Layout chung (Knight/Sorcerer/Druid, ô 88px): hàng 0/1/2 idle xuống/lên/ngang, 3/4/5 đi xuống/lên/ngang,
-##   6 đánh ngang, 7 đánh quay lưng, 8 thi pháp (4 khung), 9/10/11 ngồi/gục/quỳ (1 khung).
+## Layout CHUẨN của cả 5 vocation (sprites/vocation/<tên>_m.png, 352x1056 = 4 cột x 12 hàng, ô 88px, hàng ngang nhìn PHẢI):
+##   hàng 0/1/2 idle xuống/lên/ngang · 3/4/5 đi xuống/lên/ngang · 6/7/8 đánh xuống/lên/ngang (4 khung)
+##   hàng 9/10/11 ngồi câu cá (1 khung/hàng, chưa dùng — khóa "fish" trong SPECS). Thi pháp dùng chung hàng đánh. Chưa có hình gục -> dead_fallback.
+##   File: knight_m=Knight, paladin_m=Paladin, mage_m=Sorcerer, socerrer_m=Druid, monk_m=Monk.
 
 enum Dir { S, N, W, E }
 enum State { IDLE, WALK, ATTACK, CAST, DEAD }
@@ -31,47 +33,60 @@ const CAST_TIME := 0.45      # giây cho 1 lần thi pháp
 # faces_left: hàng "ngang" trong sheet nhìn TRÁI? (true -> hướng Đông phải lật ngang)
 # attack_faces_left: hàng đánh nhìn TRÁI?
 const SPECS := {
-	4: {  # Knight
-		"path": "res://sprites/knight/knight_sheet.png",
+	4: {  # Knight — sheet chuẩn mới: ô 88px, 4 cột x 12 hàng; hàng 0-2 idle (xuống/lên/ngang), 3-5 đi, 6-8 đánh, 9-11 câu cá (1 khung/hàng)
+		"path": "res://sprites/vocation/knight_m.png",
 		"cell": Vector2(88, 88), "feet": Vector2(44, 75), "scale": 0.5,
-		"faces_left": true, "attack_faces_left": false,
+		"faces_left": false, "attack_faces_left": false,   # hàng "ngang" trong sheet nhìn PHẢI -> hướng Tây lật ngang
 		"idle": {Dir.S: 0, Dir.N: 1, Dir.W: 2, Dir.E: 2},
 		"walk": {Dir.S: 3, Dir.N: 4, Dir.W: 5, Dir.E: 5},
-		"attack": {Dir.S: 6, Dir.N: 7, Dir.W: 6, Dir.E: 6}, "attack_frames": 3,
-		"cast": {Dir.S: 8, Dir.N: 8, Dir.W: 8, Dir.E: 8}, "cast_frames": 4,
-		"dead_row": 10,
+		"attack": {Dir.S: 6, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "attack_frames": 4,
+		"cast": {Dir.S: 6, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "cast_frames": 4,   # sheet không có hàng thi pháp riêng: dùng hàng đánh
+		"fish": {Dir.S: 9, Dir.N: 10, Dir.W: 11, Dir.E: 11},   # chưa dùng: ngồi câu cá (làm sau)
+		"dead_fallback": true,   # chưa có hình gục: xoay khung idle xuống 90°
 	},
-	1: {  # Sorcerer
-		"path": "res://sprites/sorcerer/sorcerer_sheet.png",
+	3: {  # Paladin — sheet chuẩn mới: ô 88px, 4 cột x 12 hàng; hàng 0-2 idle (xuống/lên/ngang), 3-5 đi, 6-8 đánh, 9-11 câu cá (1 khung/hàng)
+		"path": "res://sprites/vocation/paladin_m.png",
 		"cell": Vector2(88, 88), "feet": Vector2(44, 75), "scale": 0.5,
-		"faces_left": true, "attack_faces_left": false,
+		"faces_left": false, "attack_faces_left": false,   # hàng "ngang" trong sheet nhìn PHẢI -> hướng Tây lật ngang
 		"idle": {Dir.S: 0, Dir.N: 1, Dir.W: 2, Dir.E: 2},
 		"walk": {Dir.S: 3, Dir.N: 4, Dir.W: 5, Dir.E: 5},
-		"attack": {Dir.S: 6, Dir.N: 7, Dir.W: 6, Dir.E: 6}, "attack_frames": 4,
-		"cast": {Dir.S: 8, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "cast_frames": 4,
-		"dead_row": 10,
+		"attack": {Dir.S: 6, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "attack_frames": 4,
+		"cast": {Dir.S: 6, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "cast_frames": 4,   # sheet không có hàng thi pháp riêng: dùng hàng đánh
+		"fish": {Dir.S: 9, Dir.N: 10, Dir.W: 11, Dir.E: 11},   # chưa dùng: ngồi câu cá (làm sau)
+		"dead_fallback": true,   # chưa có hình gục: xoay khung idle xuống 90°
 	},
-	2: {  # Druid (atlas chính 64px: idle/walk/cast; đòn đánh là atlas riêng 192px; đủ 4 hướng riêng nên không lật)
-		"path": "res://sprites/druid/druid_atlas.png",
-		"cell": Vector2(64, 64), "feet": Vector2(32, 62), "scale": 0.55,
-		"flip": false, "faces_left": false, "attack_faces_left": false,
-		"idle": {Dir.S: 0, Dir.N: 1, Dir.W: 2, Dir.E: 3}, "idle_n": 2, "idle_fps": 2.0,
-		"walk": {Dir.S: 4, Dir.N: 5, Dir.W: 6, Dir.E: 7}, "walk_n": 9, "walk_fps": 14.0,
-		"attack_path": "res://sprites/druid/druid_attack_atlas.png",
-		"attack_cell": Vector2(192, 192), "attack_feet": Vector2(97, 126),
-		"attack": {Dir.S: 0, Dir.N: 1, Dir.W: 2, Dir.E: 3}, "attack_frames": 8, "attack_first": 1, "attack_time": 0.4,
-		"cast": {Dir.S: 8, Dir.N: 9, Dir.W: 10, Dir.E: 11}, "cast_frames": 7, "cast_time": 0.5,
-		"dead_fallback": true,
+	1: {  # Sorcerer — sheet chuẩn mới: ô 88px, 4 cột x 12 hàng; hàng 0-2 idle (xuống/lên/ngang), 3-5 đi, 6-8 đánh, 9-11 câu cá (1 khung/hàng)
+		"path": "res://sprites/vocation/mage_m.png",
+		"cell": Vector2(88, 88), "feet": Vector2(44, 75), "scale": 0.5,
+		"faces_left": false, "attack_faces_left": false,   # hàng "ngang" trong sheet nhìn PHẢI -> hướng Tây lật ngang
+		"idle": {Dir.S: 0, Dir.N: 1, Dir.W: 2, Dir.E: 2},
+		"walk": {Dir.S: 3, Dir.N: 4, Dir.W: 5, Dir.E: 5},
+		"attack": {Dir.S: 6, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "attack_frames": 4,
+		"cast": {Dir.S: 6, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "cast_frames": 4,   # sheet không có hàng thi pháp riêng: dùng hàng đánh
+		"fish": {Dir.S: 9, Dir.N: 10, Dir.W: 11, Dir.E: 11},   # chưa dùng: ngồi câu cá (làm sau)
+		"dead_fallback": true,   # chưa có hình gục: xoay khung idle xuống 90°
 	},
-	3: {  # Paladin (atlas 64px do tools/pack_frames.py tạo; đủ 4 hướng riêng nên không lật)
-		"path": "res://sprites/paladin/paladin_atlas.png",
-		"cell": Vector2(64, 64), "feet": Vector2(32, 62), "scale": 0.63,
-		"flip": false, "faces_left": false, "attack_faces_left": false,
-		"idle": {Dir.S: 0, Dir.N: 1, Dir.W: 2, Dir.E: 3}, "idle_n": 2, "idle_fps": 2.0,
-		"walk": {Dir.S: 4, Dir.N: 5, Dir.W: 6, Dir.E: 7}, "walk_n": 9, "walk_fps": 14.0,
-		"attack": {Dir.S: 8, Dir.N: 9, Dir.W: 10, Dir.E: 11}, "attack_frames": 13, "attack_first": 6, "attack_time": 0.35,
-		"cast": {Dir.S: 12, Dir.N: 13, Dir.W: 14, Dir.E: 15}, "cast_frames": 7, "cast_time": 0.5,
-		"dead_fallback": true,
+	2: {  # Druid — sheet chuẩn mới: ô 88px, 4 cột x 12 hàng; hàng 0-2 idle (xuống/lên/ngang), 3-5 đi, 6-8 đánh, 9-11 câu cá (1 khung/hàng)
+		"path": "res://sprites/vocation/socerrer_m.png",
+		"cell": Vector2(88, 88), "feet": Vector2(44, 75), "scale": 0.5,
+		"faces_left": false, "attack_faces_left": false,   # hàng "ngang" trong sheet nhìn PHẢI -> hướng Tây lật ngang
+		"idle": {Dir.S: 0, Dir.N: 1, Dir.W: 2, Dir.E: 2},
+		"walk": {Dir.S: 3, Dir.N: 4, Dir.W: 5, Dir.E: 5},
+		"attack": {Dir.S: 6, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "attack_frames": 4,
+		"cast": {Dir.S: 6, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "cast_frames": 4,   # sheet không có hàng thi pháp riêng: dùng hàng đánh
+		"fish": {Dir.S: 9, Dir.N: 10, Dir.W: 11, Dir.E: 11},   # chưa dùng: ngồi câu cá (làm sau)
+		"dead_fallback": true,   # chưa có hình gục: xoay khung idle xuống 90°
+	},
+	9: {  # Monk — sheet chuẩn mới: ô 88px, 4 cột x 12 hàng; hàng 0-2 idle (xuống/lên/ngang), 3-5 đi, 6-8 đánh, 9-11 câu cá (1 khung/hàng)
+		"path": "res://sprites/vocation/monk_m.png",
+		"cell": Vector2(88, 88), "feet": Vector2(44, 75), "scale": 0.5,
+		"faces_left": false, "attack_faces_left": false,   # hàng "ngang" trong sheet nhìn PHẢI -> hướng Tây lật ngang
+		"idle": {Dir.S: 0, Dir.N: 1, Dir.W: 2, Dir.E: 2},
+		"walk": {Dir.S: 3, Dir.N: 4, Dir.W: 5, Dir.E: 5},
+		"attack": {Dir.S: 6, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "attack_frames": 4,
+		"cast": {Dir.S: 6, Dir.N: 7, Dir.W: 8, Dir.E: 8}, "cast_frames": 4,   # sheet không có hàng thi pháp riêng: dùng hàng đánh
+		"fish": {Dir.S: 9, Dir.N: 10, Dir.W: 11, Dir.E: 11},   # chưa dùng: ngồi câu cá (làm sau)
+		"dead_fallback": true,   # chưa có hình gục: xoay khung idle xuống 90°
 	},
 }
 

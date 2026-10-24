@@ -56,6 +56,10 @@ var looks := {}             # id -> {color: Color, size: float(ô)} — tùy ch�
 # --- Animation vocation (VocSprite.gd) ---
 var vocations := {}   # pid -> vocation id (1..4 có sprite trong VocSprite.SPECS; Main.gd điền khi hello/spawn)
 var facing := {}      # pid -> VocSprite.Dir
+var harmony := {}     # pid -> số linh cầu Harmony (Monk, 0..5): vẽ cầu sáng xoay trên đầu
+var virtue := {}      # pid -> Virtue đang bật (0 không, 1 Harmony, 2 Justice, 3 Sustain): đổi màu cầu
+const ORB_SLOTS := 5
+const ORB_COLORS := [Color(1.0, 0.86, 0.38), Color(0.45, 0.82, 1.0), Color(1.0, 0.5, 0.32), Color(0.5, 1.0, 0.58)]
 var swing_at := {}    # pid -> anim time bắt đầu đánh thường
 var cast_at := {}     # pid -> anim time bắt đầu thi pháp
 var dead_until := {}  # pid -> tới khi nào còn nằm gục
@@ -132,7 +136,7 @@ func hit(pid: String):
 
 ## Gói `fx` của server: `tiles` = các ô bị hiệu ứng ma thuật; `ani` + `from` = đạn bay tới ô xa nhất.
 ## CONST_ME_*/CONST_ANI_* chưa có sprite nên chỉ vẽ khối màu tạm (thông số đúng, hình thay sau).
-func add_fx(from_t: Vector2i, cells_in: Array, has_ani: bool, has_me: bool, col := Color(1.0, 0.55, 0.15)):
+func add_fx(from_t: Vector2i, cells_in: Array, has_ani: bool, has_me: bool, col := Color(1.0, 0.55, 0.15), defs := {}):
 	var cells: Array = []
 	for c in cells_in:
 		cells.append(Vector2i(int(c[0]), int(c[1])))
@@ -141,13 +145,14 @@ func add_fx(from_t: Vector2i, cells_in: Array, has_ani: bool, has_me: bool, col 
 		for c in cells:
 			if maxi(absi(c.x - from_t.x), absi(c.y - from_t.y)) > maxi(absi(far.x - from_t.x), absi(far.y - from_t.y)):
 				far = c
-		fx_shots.append({"a": from_t, "b": far, "t0": anim, "until": anim + 0.25, "color": col})
+		fx_shots.append({"a": from_t, "b": far, "t0": anim, "until": anim + 0.25, "color": col, "def": defs.get("shot", {})})
 	if has_me and not cells.is_empty():
-		fx_cells.append({"cells": cells, "t0": anim, "until": anim + 0.45, "color": col})
+		var cdef: Dictionary = defs.get("cell", {})   # [SKIN] sprite thật (FxLib) nếu có, rỗng = khối màu tạm
+		fx_cells.append({"cells": cells, "t0": anim, "until": anim + (FxLib.duration(cdef) if not cdef.is_empty() else 0.45), "color": col, "def": cdef})
 
 ## Gói `area_fx` (B4/A6): `tiles` = [[x,y],...] tuyệt đối. Mỗi lần gửi = một nhịp hiệu ứng ~0.45s. Giới hạn 400 ô/gói để gói xấu
 ## (hoặc vùng khổng lồ) không làm tràn bộ nhớ vẽ.
-func add_area_fx(tiles_in: Array, col: Color) -> void:
+func add_area_fx(tiles_in: Array, col: Color, def := {}) -> void:
 	var cells: Array = []
 	for c in tiles_in:
 		if c is Array and c.size() >= 2:
@@ -155,13 +160,19 @@ func add_area_fx(tiles_in: Array, col: Color) -> void:
 		if cells.size() >= 400:
 			break
 	if not cells.is_empty():
-		fx_cells.append({"cells": cells, "t0": anim, "until": anim + 0.45, "color": col})
+		fx_cells.append({"cells": cells, "t0": anim, "until": anim + (FxLib.duration(def) if not def.is_empty() else 0.45), "color": col, "def": def})
+
+## [SKIN] Hiệu ứng 1 lần trên đúng 1 ô (trúng đòn / hồi máu / chết / mana shield...). def lấy từ FxLib.for_hit(...).
+func add_tile_fx(cell: Vector2i, def: Dictionary) -> void:
+	if def.is_empty():
+		return
+	fx_cells.append({"cells": [cell], "t0": anim, "until": anim + FxLib.duration(def), "color": Color(1, 1, 1), "def": def})
 
 ## Gói `shoot_fx` (B4/A6): đạn bay từ ô `a` tới ô `b`; thời gian bay tỉ lệ khoảng cách (tối thiểu 0.12s, tối đa 0.5s).
-func add_shoot_fx(a: Vector2i, b: Vector2i, col: Color) -> void:
+func add_shoot_fx(a: Vector2i, b: Vector2i, col: Color, def := {}) -> void:
 	var dist := float(maxi(absi(b.x - a.x), absi(b.y - a.y)))
 	var dur := clampf(0.06 * dist, 0.12, 0.5)
-	fx_shots.append({"a": a, "b": b, "t0": anim, "until": anim + dur, "color": col})
+	fx_shots.append({"a": a, "b": b, "t0": anim, "until": anim + dur, "color": col, "def": def})
 
 ## Đạn ĐÁNH THƯỜNG XA theo vocation (hình tạm, thay sprite thật sau): 1 Sorcerer = sét, 2 Druid = đá, 3 Paladin = mũi tên.
 ## Knight (4) và quái không có đạn -> không làm gì. Thời gian bay tỉ lệ khoảng cách (0.15 – 0.4s).
@@ -173,7 +184,16 @@ func basic_shot(a: Vector2i, b: Vector2i, voc: int) -> void:
 		return
 	var dist := float(maxi(absi(b.x - a.x), absi(b.y - a.y)))
 	var dur := clampf(0.05 * dist, 0.15, 0.4)
-	fx_shots.append({"a": a, "b": b, "t0": anim, "until": anim + dur, "style": st})
+	fx_shots.append({"a": a, "b": b, "t0": anim, "until": anim + dur, "style": st, "def": FxLib.for_basic(st)})   # [SKIN] fx/basic/<style>.png
+
+## [SKIN] Vẽ đạn bằng sprite FxLib, xoay theo hướng bay (ảnh vẽ hướng →). Phải ghép với phép zoom đang dùng trong _draw().
+func _draw_fx_shot_tex(d: Dictionary, pa: Vector2, pb: Vector2, u: float, age: float) -> void:
+	var head := pa.lerp(pb, clampf(u, 0.0, 1.0))
+	var ang := (pb - pa).angle() if pb.distance_to(pa) > 0.01 else 0.0
+	var base := Transform2D(0.0, Vector2(zoom, zoom), 0.0, center() * (1.0 - zoom))   # đúng phép đặt ở đầu _draw()
+	draw_set_transform_matrix(base * Transform2D(ang, head))
+	FxLib.draw_at(self, d, Vector2.ZERO, TILE, age)
+	draw_set_transform_matrix(base)
 
 func _draw_shot_style(st: String, pa: Vector2, pb: Vector2, u: float) -> void:
 	var k := clampf(u, 0.0, 1.0)
@@ -256,6 +276,8 @@ func forget(pid: String):
 	npc_types.erase(pid)
 	invisible.erase(pid)
 	vocations.erase(pid)
+	harmony.erase(pid)
+	virtue.erase(pid)
 	facing.erase(pid)
 	swing_at.erase(pid)
 	cast_at.erase(pid)
@@ -410,7 +432,7 @@ func _walking(pid: String) -> bool:
 
 func _draw():
 	var c = center()
-	var font = ThemeDB.fallback_font
+	var font = UiSkin.font("world")
 	draw_rect(Rect2(Vector2.ZERO, full_size), bg)   # nền vẽ trước, chưa zoom (phủ cả dải đáy màn hình)
 	draw_set_transform(c * (1.0 - zoom), 0.0, Vector2(zoom, zoom))   # zoom quanh tâm màn hình
 	_in_draw = true
@@ -418,7 +440,7 @@ func _draw():
 	for g in gates:
 		var gp = tile_to_screen(g)
 		if MapArt.ready():
-			draw_texture_rect_region(MapArt.tex("Tilemap_Flat.png"), Rect2(gp, Vector2(TILE, TILE)), MapArt.SAND)
+			MapArt.draw_floor(self, MapArt.theme_def(map_theme), gp, Vector2(TILE, TILE), g)
 		draw_rect(Rect2(gp, Vector2(TILE, TILE)), Color(0.2, 0.8, 0.9, 0.35))   # cổng warp: phủ xanh nhạt
 		draw_rect(Rect2(gp, Vector2(TILE, TILE)), Color(1, 1, 1, 0.9), false, 2.0)
 	if dest.x >= 0:
@@ -432,6 +454,11 @@ func _draw():
 	_draw_fields()
 	fx_cells = fx_cells.filter(func(f): return anim < f["until"])
 	for f in fx_cells:
+		var cdef: Dictionary = f.get("def", {})
+		if not cdef.is_empty():   # [SKIN] có sprite thật: vẽ khung hiện tại trên từng ô, bỏ khối màu tạm
+			for cell in f["cells"]:
+				FxLib.draw_at(self, cdef, tile_to_screen(cell) + Vector2(TILE, TILE) / 2, TILE, anim - f["t0"])
+			continue
 		var k = 1.0 - (anim - f["t0"]) / (f["until"] - f["t0"])
 		var fc: Color = f.get("color", Color(1.0, 0.55, 0.15))
 		for cell in f["cells"]:
@@ -442,6 +469,10 @@ func _draw():
 		var pa = tile_to_screen(f["a"]) + Vector2(TILE, TILE) / 2
 		var pb = tile_to_screen(f["b"]) + Vector2(TILE, TILE) / 2
 		var sc: Color = f.get("color", Color(1, 0.95, 0.5))
+		var sdef: Dictionary = f.get("def", {})
+		if not sdef.is_empty():   # [SKIN] đạn có sprite thật (xoay theo hướng bay)
+			_draw_fx_shot_tex(sdef, pa, pb, u, anim - f["t0"])
+			continue
 		var st: String = f.get("style", "")
 		if st != "":
 			_draw_shot_style(st, pa, pb, u)   # đạn đánh thường theo vocation
@@ -517,7 +548,7 @@ func _on_screen(local_pos: Vector2) -> bool:
 	return s.x > -m and s.y > -m and s.x < full_size.x + m and s.y < full_size.y + m
 
 func _draw_actor(pid: String, p: Vector2):
-	var font = ThemeDB.fallback_font
+	var font = UiSkin.font("world")
 	var is_me = pid == player_id
 	if invisible.get(pid, false) and not is_me:
 		return   # tàng hình: người khác/quái không thấy
@@ -540,7 +571,9 @@ func _draw_actor(pid: String, p: Vector2):
 	elif kinds.get(pid) == "npc":
 		_draw_npc(pid, nm, p)
 	elif VocSprite.has(int(vocations.get(pid, 0))):
+		_draw_harmony_orbs(pid, p, false)   # cầu phía sau đầu (vẽ trước sprite)
 		_draw_knight(pid, p, is_me, flash_on, font)
+		_draw_harmony_orbs(pid, p, true)    # cầu phía trước đầu (vẽ sau sprite)
 	else:
 		var shirt = Color(0.15, 0.3, 0.85) if is_me else Color(0.15, 0.65, 0.3)
 		draw_line(p + Vector2(9, 16), p + Vector2(9 + leg, 23), Color(0.3, 0.2, 0.15), 3.0)  # chân
@@ -554,14 +587,43 @@ func _draw_actor(pid: String, p: Vector2):
 		if not is_me:
 			draw_string(font, p + Vector2(0, -4), pid, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.7, 1, 0.7))
 
+func set_harmony(pid: String, n: int, v: int) -> void:
+	harmony[pid] = clampi(n, 0, ORB_SLOTS)
+	virtue[pid] = clampi(v, 0, 3)
+	queue_redraw()
+
+## Monk: tối đa 5 linh cầu sáng nhỏ xoay quanh đầu (như Champion Ragnarok). Mỗi điểm Harmony = 1 cầu, cầu giữ nguyên vị trí
+## khi tích thêm. `front` = nửa quỹ đạo gần người xem (lớn, sáng, vẽ SAU sprite); nửa xa vẽ TRƯỚC sprite (nhỏ, mờ).
+func _draw_harmony_orbs(pid: String, p: Vector2, front: bool) -> void:
+	var n: int = int(harmony.get(pid, 0))
+	if n <= 0:
+		return   # (người tàng hình đã bị loại ở _draw_entity trước khi tới đây)
+	var col: Color = ORB_COLORS[clampi(int(virtue.get(pid, 0)), 0, 3)]
+	var center := p + Vector2(TILE * 0.5, TILE * 0.02)
+	var rx := TILE * 0.52
+	var ry := TILE * 0.14
+	for i in n:
+		var a := anim * 2.4 + float(i) * TAU / float(ORB_SLOTS)
+		var depth := sin(a)   # > 0: nửa gần người xem
+		if (depth > 0.0) != front:
+			continue
+		var pos := center + Vector2(cos(a) * rx, depth * ry)
+		var pulse := 1.0 + 0.12 * sin(anim * 5.0 + float(i) * 1.7)
+		var r := (2.1 + 0.7 * depth) * pulse
+		var alpha := 0.7 + 0.3 * depth
+		draw_circle(pos, r + 3.2, Color(col.r, col.g, col.b, 0.14 * alpha))   # quầng sáng
+		draw_circle(pos, r + 1.4, Color(col.r, col.g, col.b, 0.32 * alpha))
+		draw_circle(pos, r, Color(col.r, col.g, col.b, alpha))                # lõi
+		draw_circle(pos + Vector2(-0.5, -0.6) * r, r * 0.45, Color(1, 1, 1, 0.85 * alpha))   # điểm sáng
+
 func _draw_invisible_tag(p: Vector2) -> void:
 	draw_arc(p + Vector2(TILE * 0.5, TILE * 0.5), TILE * 0.55, 0.0, TAU, 20, Color(0.7, 0.85, 1.0, 0.8), 1.5)
-	draw_string(ThemeDB.fallback_font, p + Vector2(0, TILE + 10), "invisible", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.85, 1.0))
+	draw_string(UiSkin.font("world"), p + Vector2(0, TILE + 10), "invisible", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.85, 1.0))
 
 ## NPC (làn E): hình người đứng yên, màu áo theo `looks[pid].color` (Main gán theo tên NPC), tên màu xanh ngọc phía trên.
 ## Chỗ để thay bằng sprite thật: giữ chữ ký hàm.
 func _draw_npc(pid: String, nm: String, p: Vector2) -> void:
-	var font = ThemeDB.fallback_font
+	var font = UiSkin.font("world")
 	if str(npc_types.get(pid, "")) == "depot":
 		_draw_chest(nm, p)
 		return
@@ -578,7 +640,7 @@ func _draw_npc(pid: String, nm: String, p: Vector2) -> void:
 
 ## Hòm đồ (NPC type depot): cái rương gỗ có đai + khóa vàng. Chỗ để thay bằng sprite thật: giữ chữ ký hàm.
 func _draw_chest(nm: String, p: Vector2) -> void:
-	var font = ThemeDB.fallback_font
+	var font = UiSkin.font("world")
 	var wood := Color(0.55, 0.36, 0.16)
 	draw_rect(Rect2(p + Vector2(3, 10), Vector2(18, 12)), wood)
 	draw_rect(Rect2(p + Vector2(3, 6), Vector2(18, 6)), wood.lightened(0.15))
@@ -601,7 +663,7 @@ func _draw_party_flag(pid: String, p: Vector2) -> void:
 
 ## Đang ngủ: phủ xanh tối lên ô + chữ Z bay lên (chỗ để thay bằng sprite nằm: giữ chữ ký hàm).
 func _draw_sleep_overlay(p: Vector2) -> void:
-	var font = ThemeDB.fallback_font
+	var font = UiSkin.font("world")
 	draw_rect(Rect2(p, Vector2(TILE, TILE)), Color(0.1, 0.15, 0.4, 0.4))
 	for i in 3:
 		var t := fmod(anim * 0.6 + float(i) / 3.0, 1.0)   # 0..1: mỗi chữ Z bay lên rồi mờ dần
@@ -609,7 +671,7 @@ func _draw_sleep_overlay(p: Vector2) -> void:
 
 ## NPC Nhà (type house): ngôi nhà nhỏ mái đỏ. Chỗ để thay bằng sprite thật: giữ chữ ký hàm.
 func _draw_house_npc(nm: String, p: Vector2) -> void:
-	var font = ThemeDB.fallback_font
+	var font = UiSkin.font("world")
 	draw_rect(Rect2(p + Vector2(4, 12), Vector2(16, 10)), Color(0.9, 0.82, 0.62))
 	draw_rect(Rect2(p + Vector2(4, 12), Vector2(16, 10)), Color(0.3, 0.2, 0.1), false, 1.0)
 	draw_colored_polygon(PackedVector2Array([p + Vector2(1, 12), p + Vector2(12, 3), p + Vector2(23, 12)]), Color(0.75, 0.2, 0.18))
@@ -621,7 +683,7 @@ func _draw_house_npc(nm: String, p: Vector2) -> void:
 func _draw_houses() -> void:
 	if houses.is_empty():
 		return
-	var font = ThemeDB.fallback_font
+	var font = UiSkin.font("world")
 	var ts := Vector2(TILE, TILE)
 	var vr := _visible_tiles()
 	for h in houses:
@@ -697,7 +759,11 @@ func _draw_houses() -> void:
 ##  - bậc cao (>= 0.65) thêm sừng
 ## Server có gửi `spawn.color` / `spawn.size` (xem PROTOCOL §Làn D) thì dùng đúng giá trị đó.
 ## Chỗ để thay bằng sprite thật: giữ nguyên chữ ký hàm, vẽ AnimatedSprite2D thay cho các lệnh draw_* bên dưới.
-func _draw_creature_placeholder(pid: String, nm: String, p: Vector2, flash_on: bool, leg: float) -> void:
+## [VFX] Thông số hình tạm của quái (màu / tỉ lệ cỡ / bậc máu). Dùng chung cho _draw_creature_placeholder và
+## VfxGhost (bóng quái chết bốc hơi) để hai nơi luôn vẽ giống nhau. Trả {col: Color, frac: float, tier: float}.
+func creature_look(pid: String, nm := "") -> Dictionary:
+	if nm == "":
+		nm = str(names.get(pid, pid))
 	var mx := 1
 	if hps.has(pid):
 		mx = maxi(1, int(hps[pid][1]))
@@ -710,6 +776,13 @@ func _draw_creature_placeholder(pid: String, nm: String, p: Vector2, flash_on: b
 	else:
 		var hue := fposmod(lerpf(0.33, 0.0, tier) + (float(nm.hash() % 1000) / 1000.0 - 0.5) * 0.12, 1.0)
 		col = Color.from_hsv(hue, 0.65, 0.85)
+	return {"col": col, "frac": frac, "tier": tier}
+
+func _draw_creature_placeholder(pid: String, nm: String, p: Vector2, flash_on: bool, leg: float) -> void:
+	var lk := creature_look(pid, nm)   # [VFX] tách ra để VfxGhost dùng chung
+	var tier: float = lk["tier"]
+	var frac: float = lk["frac"]
+	var col: Color = lk["col"]
 	var r := TILE * frac * 0.5
 	var c := p + Vector2(TILE / 2.0, TILE - r - absf(leg) * 0.4)  # đáy chạm đáy ô, nảy nhẹ khi đi
 	if tier >= 0.65:
@@ -768,54 +841,26 @@ func _draw_ground(c: Vector2) -> void:
 			if _on_screen(tile_to_screen(wc)):
 				draw_rect(Rect2(tile_to_screen(wc), Vector2(TILE, TILE)), Color(0.32, 0.32, 0.37))
 		return
-	var flat := MapArt.tex("Tilemap_Flat.png")
-	var th := MapArt.theme_def(map_theme)
-	var floor_src: Rect2 = th["floor"]
-	var floor_tint: Color = th["tint"]
-	var wall_tint: Color = th["wall_tint"]
-	var water_tint: Color = th["water_tint"]
-	var elev := MapArt.tex("Tilemap_Elevation.png")
-	var water := MapArt.tex("Water.png")
-	var vr := _visible_tiles()
-	var ts := Vector2(TILE, TILE)
-	for ty in range(vr.position.y, vr.end.y):
-		for tx in range(vr.position.x, vr.end.x):
-			var cell := Vector2i(tx, ty)
-			var pos := tile_to_screen(cell)
-			if tx < 0 or ty < 0 or tx >= map_w or ty >= map_h:
-				if water != null:
-					draw_texture_rect(water, Rect2(pos, ts), false, water_tint)   # ngoài map: nước
-				continue
-			if wall_set.has(cell):
-				draw_texture_rect_region(elev, Rect2(pos, ts), MapArt.STONE_TOP, wall_tint)
-				if not wall_set.has(Vector2i(tx, ty + 1)):   # ô phía nam không phải tường -> thấy mặt gạch
-					draw_texture_rect_region(elev, Rect2(pos, ts), MapArt.STONE_FACE, wall_tint)
-			else:
-				draw_texture_rect_region(flat, Rect2(pos, ts), floor_src, floor_tint)
+	# nền / tường / ngoài map theo theme (MapArt.draw_ground; base = góc trái-trên ô (0,0) trên màn hình)
+	MapArt.draw_ground(self, _visible_tiles(), tile_to_screen(Vector2i.ZERO), float(TILE), map_w, map_h,
+		wall_set, MapArt.theme_def(map_theme), anim)
 
 func _draw_props() -> void:
 	if not MapArt.ready():
 		return
+	var tint: Color = MapArt.theme_def(map_theme)["prop_tint"]
 	for d in decor:
 		if d["k"] != "prop":
 			continue
-		var cell := Vector2i(int(d["x"]), int(d["y"]))
-		var pos := tile_to_screen(cell)
+		var pos := tile_to_screen(Vector2i(int(d["x"]), int(d["y"])))
 		if not _on_screen(pos):
 			continue
-		var t := MapArt.tex("deco/%02d.png" % int(d["v"]))
-		if t == null:
-			continue
-		var sz := t.get_size() * 0.5
-		draw_texture_rect(t, Rect2(pos + Vector2((TILE - sz.x) / 2.0, TILE - sz.y), sz), false)
+		MapArt.draw_sprite(self, str(d["f"]), pos, float(TILE), tint)
 
-## Cây vẽ SAU quái, TRƯỚC hero. Có thực thể nào (hero hay quái) đứng trong vùng tán (3 ô rộng x 3 ô cao phía trên gốc)
+## Cây vẽ SAU quái, TRƯỚC hero. Có thực thể nào (hero hay quái) đứng trong vùng tán (rộng theo sprite, cao ~80% sprite phía trên gốc)
 ## thì cây mờ dần xuống TREE_FADE_ALPHA, rời đi thì rõ lại.
 func _draw_trees() -> void:
 	if not MapArt.ready():
-		return
-	var tex := MapArt.tex("Tree.png")
-	if tex == null:
 		return
 	var occupied := {}
 	for pid in tiles:
@@ -824,23 +869,22 @@ func _draw_trees() -> void:
 		var d: Dictionary = decor[i]
 		if d["k"] != "tree":
 			continue
+		var key := str(d["f"])
+		var m: Array = MapArt.meta(key)
 		var cell := Vector2i(int(d["x"]), int(d["y"]))
 		var pos := tile_to_screen(cell)
-		if not _on_screen(pos - Vector2(0, TILE * 2.0)):
+		var sprite_h: float = float(m[1]) * MapArt.SCALE
+		if not _on_screen(pos - Vector2(0, sprite_h)):
 			continue
+		var half_w := maxi(1, int(ceil(float(m[0]) * MapArt.SCALE / TILE / 2.0 - 0.01)))   # nửa bề ngang tán (ô)
+		var up := clampi(int(ceil(sprite_h * 0.8 / TILE)), 2, 4)                            # chiều cao tán (ô)
 		var under := false
-		for oy in range(-2, 1):
-			for ox in range(-1, 2):
+		for oy in range(-up, 1):
+			for ox in range(-half_w, half_w + 1):
 				if occupied.has(cell + Vector2i(ox, oy)):
 					under = true
 		var a: float = tree_alpha.get(i, 1.0)
 		a = move_toward(a, TREE_FADE_ALPHA if under else 1.0, _dt * 5.0)
 		tree_alpha[i] = a
-		var variant := int(d["v"])
-		var row := 0 if variant < 2 else 1
-		var frames := 4 if row == 0 else 2
-		var col := (int(anim * (5.0 if row == 0 else 3.0)) + int(d["ph"])) % frames
-		var src := Rect2(col * MapArt.TREE_CELL, row * MapArt.TREE_CELL, MapArt.TREE_CELL, MapArt.TREE_CELL)
-		var feet := pos + Vector2(TILE / 2.0, TILE - 1.0)
-		var sz := Vector2(MapArt.TREE_CELL, MapArt.TREE_CELL) * MapArt.TREE_SCALE
-		draw_texture_rect_region(tex, Rect2(feet - MapArt.TREE_FEET * MapArt.TREE_SCALE, sz), src, Color(1, 1, 1, a))
+		var sway := 1.0 + 0.012 * sin(anim * 1.3 + float(d["ph"]))   # lắc nhẹ (co giãn dọc ~1%) vì sprite cây mới là ảnh tĩnh
+		MapArt.draw_sprite(self, key, pos, float(TILE), Color(1, 1, 1, a), sway)
